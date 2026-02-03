@@ -349,6 +349,11 @@
           rect.setAttribute("data-job-id", job.job_id);
           rect.classList.add("timeline-bar", "job-bar", "wait");
           if (slot.unusual) rect.classList.add("unusual");
+          // Hide waiting period for finished jobs (show only on hover)
+          const isActive = job.state === "RUNNING" || job.state === "PENDING";
+          if (!isActive) {
+            rect.classList.add("wait-historic");
+          }
           svg.appendChild(rect);
         }
 
@@ -592,6 +597,11 @@
       if (!job) return;
       tooltip.innerHTML = buildTooltipHtml(job);
       tooltip.classList.add("visible");
+      
+      // Show historic waiting bars for this job
+      document.querySelectorAll(`.wait-historic[data-job-id="${jobId}"]`).forEach((el) => {
+        el.style.opacity = "0.5";
+      });
       tooltip.setAttribute("aria-hidden", "false");
       const pad = 12;
       tooltip.style.left = (ev.clientX + pad) + "px";

@@ -212,6 +212,12 @@ body {
   opacity: 0.5;
 }
 
+/* Hide waiting periods for finished jobs by default */
+.timeline-bar.wait.wait-historic {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
 .timeline-bar.unusual {
   fill: var(--danger-bg);
 }
