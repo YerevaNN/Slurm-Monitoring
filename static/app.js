@@ -620,6 +620,10 @@
   }
 
   function fetchJobs() {
+    // Update time range first for live mode
+    if (!state.historyMode) {
+      setTimeRange(12);
+    }
     const intervalSec = Math.floor(state.refreshIntervalMs / 1000);
     const url = "/api/jobs?from=" + state.timeMin + "&to=" + state.timeMax + "&interval=" + intervalSec;
     fetch(url)
@@ -631,9 +635,6 @@
         state.node_reasons = data.node_reasons || {};
         state.gpusPerNode = data.gpus_per_node || GPUS_PER_NODE;
         state.cpusPerNode = data.cpus_per_node || CPUS_PER_NODE;
-        if (!state.historyMode) {
-          setTimeRange(12);
-        }
         render();
         const modeLabel = state.historyMode ? " (history)" : "";
         document.getElementById("last-updated").textContent = "Updated " + new Date().toLocaleTimeString() + modeLabel;
