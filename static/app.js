@@ -54,7 +54,13 @@
     const newHalf = inOut > 0 ? Math.max(1 * 60 * 60 * 1000, half / 1.5) : Math.min(7 * 24 * 60 * 60 * 1000, half * 1.5);
     state.timeMin = center - newHalf;
     state.timeMax = center + newHalf;
-    render();
+    
+    // Re-fetch data after zoom to get current data for the new window
+    if (state.historyMode) {
+      fetchJobs();
+    } else {
+      render();
+    }
   }
 
   function timeToX(ms, width) {
@@ -706,11 +712,7 @@
     viewHistoryAt(pickedMs);
   }
 
-  function goLive() {
-    state.historyMode = false;
-    setTimeRange(12);
-    
-    // Populate date/time inputs with current time
+  function populateDateTimePickers() {
     const now = new Date();
     const dateInput = document.getElementById("history-date");
     const timeInput = document.getElementById("history-time");
@@ -725,7 +727,12 @@
     const hours = String(now.getHours()).padStart(2, '0');
     const minutes = String(now.getMinutes()).padStart(2, '0');
     timeInput.value = `${hours}:${minutes}`;
-    
+  }
+
+  function goLive() {
+    state.historyMode = false;
+    setTimeRange(12);
+    populateDateTimePickers();
     fetchJobs();
     startRefresh();
   }
@@ -748,19 +755,8 @@
   });
 
   // Populate date/time inputs with current time on load
-  const now = new Date();
-  const dateInput = document.getElementById("history-date");
-  const timeInput = document.getElementById("history-time");
+  populateDateTimePickers();
   
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  dateInput.value = `${year}-${month}-${day}`;
-  
-  const hours = String(now.getHours()).padStart(2, '0');
-  const minutes = String(now.getMinutes()).padStart(2, '0');
-  timeInput.value = `${hours}:${minutes}`;
-
   setTimeRange(12);
   fetchJobs();
   startRefresh();
