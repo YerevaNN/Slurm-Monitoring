@@ -1,0 +1,372 @@
+:root {
+  --bg: #0f0f12;
+  --surface: #18181c;
+  --row-bg: #1e1e24;
+  --border: #2a2a30;
+  --text: #e4e4e7;
+  --text-muted: #71717a;
+  --accent: #3b82f6;
+  --danger: #991b1b;
+  --danger-bg: #7f1d1d;
+  --row-height: 72px;
+  --font-mono: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1.25rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.header h1 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.header h1 .title-total {
+  color: var(--text-muted);
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.controls label { color: var(--text-muted); }
+
+.controls select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 0.35rem 0.5rem;
+  border-radius: 4px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.controls button {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 4px;
+  font: inherit;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.controls button:hover {
+  background: var(--border);
+}
+
+.last-updated {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.dashboard {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.half {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 300px;
+  border-right: 1px solid var(--border);
+}
+
+.half:last-child { border-right: none; }
+
+.half-label {
+  padding: 0.5rem 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.timelines {
+  flex: 1;
+  overflow: visible;
+  padding: 0.5rem;
+  padding-bottom: 60vh;
+}
+
+.timeline-row {
+  display: flex;
+  align-items: center;
+  min-height: var(--row-height);
+  margin-bottom: 2px;
+}
+
+.timeline-row .row-label {
+  flex: 0 0 52px;
+  padding-right: 0.5rem;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.timeline-row .row-chart {
+  flex: 1;
+  min-width: 0;
+  height: var(--row-height);
+  position: relative;
+  background: var(--row-bg);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.node-status-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  color: #fff;
+  pointer-events: none;
+  text-shadow: 0 0 4px rgba(0, 0, 0, 0.8);
+}
+
+.node-status-overlay .node-status-label {
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.node-status-overlay .node-status-reason {
+  font-size: 0.75rem;
+  font-weight: 400;
+  max-width: 95%;
+  text-align: center;
+  line-height: 1.2;
+}
+
+.timeline-row .row-chart svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.timeline-bar {
+  cursor: default;
+}
+
+.timeline-bar.wait {
+  opacity: 0.5;
+}
+
+.timeline-bar.unusual {
+  fill: var(--danger-bg);
+}
+
+.timeline-bar.unusual.wait {
+  fill: var(--danger);
+  opacity: 0.55;
+}
+
+.timeline-bar text {
+  fill: var(--text);
+  font-size: 10px;
+  font-family: inherit;
+}
+
+.timeline-bar.unusual text {
+  fill: #fca5a5;
+}
+
+.timeline-bar .label,
+.row-chart text.label {
+  dominant-baseline: middle;
+  pointer-events: none;
+}
+
+.time-axis-row {
+  min-height: 28px;
+}
+
+.time-axis-row .row-chart {
+  height: 28px;
+}
+
+.time-axis .time-axis-tick {
+  stroke: var(--text);
+}
+
+.time-axis .time-axis-label {
+  fill: var(--text);
+  font-size: 10px;
+  font-family: inherit;
+}
+
+.row-chart .guideline {
+  stroke: #323238;
+  stroke-width: 1px;
+  pointer-events: none;
+}
+
+.row-chart .guideline-now {
+  stroke: #484850;
+  stroke-width: 1.5px;
+}
+
+.job-tooltip {
+  position: fixed;
+  z-index: 1000;
+  padding: 0.75rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  font-size: 11px;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.1s, visibility 0.1s;
+}
+
+.job-tooltip.visible {
+  opacity: 1;
+  visibility: visible;
+}
+
+.tooltip-table {
+  border-collapse: collapse;
+}
+
+.tooltip-table th {
+  text-align: left;
+  padding: 0.2rem 0.75rem 0.2rem 0;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.tooltip-table td {
+  padding: 0.2rem 0;
+  color: var(--text);
+}
+
+.timeline-bar.job-bar {
+  cursor: pointer;
+}
+
+.timeline-bar.job-bar.highlight {
+  filter: brightness(1.35);
+  stroke: var(--text);
+  stroke-width: 1.5px;
+}
+
+.timeline-bar.wait.job-bar.highlight {
+  opacity: 0.75;
+}
+
+.job-edit-popup {
+  position: fixed;
+  z-index: 1001;
+  padding: 0.75rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.15s, visibility 0.15s;
+}
+
+.job-edit-popup.visible {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+.job-edit-table {
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.job-edit-table th {
+  text-align: left;
+  padding: 0.35rem 0.75rem 0.35rem 0;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.job-edit-table td {
+  padding: 0.35rem 0;
+}
+
+.job-edit-table .edit-input {
+  width: 4.5rem;
+  padding: 0.35rem 0.5rem;
+  margin: 0 0.25rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  text-align: center;
+}
+
+.job-edit-popup .edit-btn {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--border);
+  background: var(--row-bg);
+  color: var(--text);
+  border-radius: 4px;
+  font: inherit;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.job-edit-popup .edit-btn:hover {
+  background: var(--border);
+}
+
+.job-edit-popup .edit-save {
+  margin-top: 0.5rem;
+  padding: 0.4rem 0.75rem;
+  width: 100%;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.job-edit-popup .edit-save:hover {
+  filter: brightness(1.1);
+}

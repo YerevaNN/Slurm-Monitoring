@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Slurm cluster dashboard</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header class="header">
+    <h1>Slurm cluster</h1>
+    <div class="controls">
+      <label>Refresh</label>
+      <select id="refresh-interval" aria-label="Refresh interval">
+        <option value="5">5 s</option>
+        <option value="10" selected>10 s</option>
+        <option value="30">30 s</option>
+        <option value="60">60 s</option>
+      </select>
+      <button id="zoom-out" type="button" aria-label="Zoom out">−</button>
+      <button id="zoom-in" type="button" aria-label="Zoom in">+</button>
+      <span id="last-updated" class="last-updated"></span>
+    </div>
+  </header>
+  <div id="job-tooltip" class="job-tooltip" aria-hidden="true"></div>
+  <div id="job-edit-popup" class="job-edit-popup" aria-hidden="true">
+    <table class="job-edit-table">
+      <tr>
+        <th>Priority</th>
+        <td>
+          <button type="button" class="edit-btn edit-minus" data-field="priority" aria-label="Decrease">−</button>
+          <input type="number" id="edit-priority" class="edit-input" min="0" step="1" />
+          <button type="button" class="edit-btn edit-plus" data-field="priority" aria-label="Increase">+</button>
+        </td>
+      </tr>
+      <tr>
+        <th>Memory (MB)</th>
+        <td>
+          <button type="button" class="edit-btn edit-minus" data-field="memory_mb" aria-label="Decrease">−</button>
+          <input type="number" id="edit-memory_mb" class="edit-input" min="0" step="1" />
+          <button type="button" class="edit-btn edit-plus" data-field="memory_mb" aria-label="Increase">+</button>
+        </td>
+      </tr>
+      <tr>
+        <th>CPUs</th>
+        <td>
+          <button type="button" class="edit-btn edit-minus" data-field="num_cpus" aria-label="Decrease">−</button>
+          <input type="number" id="edit-num_cpus" class="edit-input" min="0" step="1" />
+          <button type="button" class="edit-btn edit-plus" data-field="num_cpus" aria-label="Increase">+</button>
+        </td>
+      </tr>
+    </table>
+    <button type="button" class="edit-save" aria-label="Save">✓ Save</button>
+  </div>
+  <main class="dashboard">
+    <div class="half gpu-half">
+      <div class="half-label">GPU</div>
+      <div id="gpu-timelines" class="timelines"></div>
+    </div>
+    <div class="half cpu-half">
+      <div class="half-label">CPU</div>
+      <div id="cpu-timelines" class="timelines"></div>
+    </div>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>
