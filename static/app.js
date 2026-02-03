@@ -199,8 +199,7 @@
     const rows = {};
     getRowLabels().forEach((label) => { rows[label] = []; });
 
-    // In history mode, use the center of the time window as "now" for pending jobs
-    const now = state.historyMode ? Math.floor((state.timeMin + state.timeMax) / 2) : nowMs();
+    const now = nowMs();
     const perNode = isGpu ? state.gpusPerNode : state.cpusPerNode;
 
     state.jobs.forEach((job) => {
