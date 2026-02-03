@@ -14,7 +14,7 @@
     const all = [...new Set([...nodes, ...fromJobs])].sort();
     return all.concat("Pending");
   }
-  const UNUSUAL_STATES = new Set(["CANCELLED", "CANCELLING", "FAILED", "TIMEOUT", "NODE_FAIL", "BOOT_FAIL", "PREEMPTED", "REVOKED", "SPECIAL_EXIT"]);
+  const UNUSUAL_STATES = new Set(["CANCELLED", "CANCELLING", "FAILED", "TIMEOUT", "NODE_FAIL", "BOOT_FAIL", "PREEMPTED", "REVOKED", "SPECIAL_EXIT", "FINISHED_UNKNOWN"]);
   const BAD_NODE_STATES = new Set(["DOWN", "DRAIN", "DRNG", "MAINT", "NOT_RESPONDING"]);
   const UNUSUAL_EMOJI = "⚠️";
   const PALETTE = [
@@ -33,6 +33,7 @@
     timeMax: 0,
     refreshIntervalMs: 10000,
     refreshTimer: null,
+    historyMode: false,
   };
 
   function nowMs() {
@@ -619,7 +620,9 @@
   }
 
   function fetchJobs() {
-    fetch("/api/jobs")
+    const intervalSec = Math.floor(state.refreshIntervalMs / 1000);
+    const url = "/api/jobs?from=" + state.timeMin + "&to=" + state.timeMax + "&interval=" + intervalSec;
+    fetch(url)
       .then((r) => r.json())
       .then((data) => {
         state.jobs = data.jobs || [];
@@ -628,9 +631,12 @@
         state.node_reasons = data.node_reasons || {};
         state.gpusPerNode = data.gpus_per_node || GPUS_PER_NODE;
         state.cpusPerNode = data.cpus_per_node || CPUS_PER_NODE;
-        setTimeRange(12);
+        if (!state.historyMode) {
+          setTimeRange(12);
+        }
         render();
-        document.getElementById("last-updated").textContent = "Updated " + new Date().toLocaleTimeString();
+        const modeLabel = state.historyMode ? " (history)" : "";
+        document.getElementById("last-updated").textContent = "Updated " + new Date().toLocaleTimeString() + modeLabel;
       })
       .catch(() => {
         document.getElementById("last-updated").textContent = "Update failed";
@@ -642,8 +648,40 @@
     state.refreshTimer = setInterval(fetchJobs, state.refreshIntervalMs);
   }
 
+  function viewHistory() {
+    const dateInput = document.getElementById("history-date");
+    if (!dateInput.value) {
+      alert("Please select a date/time");
+      return;
+    }
+    const picked = new Date(dateInput.value);
+    const pickedMs = picked.getTime();
+    if (isNaN(pickedMs)) {
+      alert("Invalid date/time");
+      return;
+    }
+    const halfWindow = 12 * 60 * 60 * 1000;
+    state.historyMode = true;
+    state.timeMin = pickedMs - halfWindow;
+    state.timeMax = pickedMs + halfWindow;
+    if (state.refreshTimer) {
+      clearInterval(state.refreshTimer);
+      state.refreshTimer = null;
+    }
+    fetchJobs();
+  }
+
+  function goLive() {
+    state.historyMode = false;
+    setTimeRange(12);
+    fetchJobs();
+    startRefresh();
+  }
+
   document.getElementById("zoom-in").addEventListener("click", () => zoom(1));
   document.getElementById("zoom-out").addEventListener("click", () => zoom(-1));
+  document.getElementById("view-history").addEventListener("click", viewHistory);
+  document.getElementById("live-mode").addEventListener("click", goLive);
   document.getElementById("refresh-interval").addEventListener("change", (e) => {
     state.refreshIntervalMs = parseInt(e.target.value, 10) * 1000;
     startRefresh();

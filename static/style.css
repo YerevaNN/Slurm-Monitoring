@@ -81,6 +81,35 @@ body {
   background: var(--border);
 }
 
+.controls #history-date {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 0.35rem 0.5rem;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.controls #view-history,
+.controls #live-mode {
+  width: auto;
+  padding: 0.35rem 0.75rem;
+  font-size: 11px;
+}
+
+.controls #live-mode {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.controls #live-mode:hover {
+  filter: brightness(1.1);
+}
+
 .last-updated {
   color: var(--text-muted);
   font-size: 11px;

@@ -291,6 +291,32 @@ def fetch_node_capacities() -> tuple[int, int]:
     return gpus, cpus
 
 
+def get_job_final_info(job_id: str) -> tuple[str | None, int | None]:
+    """
+    Get final state and end time from scontrol show job.
+    Returns (state, end_time_ms) or (None, None) if job not found/purged.
+    """
+    out = _run(["scontrol", "show", "job", str(job_id)])
+    if not out:
+        return None, None
+    
+    state = None
+    end_time_ms = None
+    
+    # Parse JobState=...
+    m = re.search(r"JobState=(\S+)", out)
+    if m:
+        state = m.group(1).strip().upper()
+    
+    # Parse EndTime=...
+    m = re.search(r"EndTime=(\S+)", out)
+    if m:
+        end_time_str = m.group(1).strip()
+        end_time_ms = _parse_ts(end_time_str)
+    
+    return state, end_time_ms
+
+
 def update_job_settings(job_id: str, priority: int | None = None, num_cpus: int | None = None, memory_mb: int | None = None) -> tuple[bool, str]:
     """Update pending job settings via scontrol. Returns (success, message)."""
     args = ["scontrol", "update", "jobid=" + str(job_id)]

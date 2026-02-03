@@ -6,3 +6,7 @@ GPUS_PER_NODE = 8
 CPUS_PER_NODE = 224
 REFRESH_INTERVALS = [5, 10, 30, 60]  # seconds
 DEFAULT_REFRESH = 10
+
+# History settings
+HISTORY_DB_PATH = os.path.join(os.path.dirname(__file__), "data", "slurm_history.db")
+HISTORY_RETENTION_DAYS = 7
