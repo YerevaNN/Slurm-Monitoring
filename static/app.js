@@ -316,6 +316,8 @@
         return;
       }
       
+      // For lane assignment, use main period (running jobs) or wait period (pending jobs)
+      // Don't include waiting periods of finished jobs to avoid unnecessary lane creation
       const slotStart = slot.mainStart || slot.waitStart;
       const slotEnd = slot.mainEnd || slot.waitEnd;
       
@@ -325,10 +327,15 @@
         return;
       }
       
+      // For finished jobs with both wait and main periods, only check main period overlap
+      const useMainOnly = slot.mainStart != null && slot.mainEnd != null;
+      const checkStart = useMainOnly ? slot.mainStart : slotStart;
+      const checkEnd = useMainOnly ? slot.mainEnd : slotEnd;
+      
       // Find first available lane (where all jobs have ended before this one starts)
       let assignedLane = -1;
       for (let i = 0; i < lanes.length; i++) {
-        if (lanes[i].endTime <= slotStart) {
+        if (lanes[i].endTime <= checkStart) {
           assignedLane = i;
           break;
         }
@@ -337,9 +344,9 @@
       // If no lane available, create a new one
       if (assignedLane === -1) {
         assignedLane = lanes.length;
-        lanes.push({ endTime: slotEnd, heightFrac: slot.heightFrac });
+        lanes.push({ endTime: checkEnd, heightFrac: slot.heightFrac });
       } else {
-        lanes[assignedLane] = { endTime: slotEnd, heightFrac: slot.heightFrac };
+        lanes[assignedLane] = { endTime: checkEnd, heightFrac: slot.heightFrac };
       }
       
       slot.lane = assignedLane;
