@@ -295,40 +295,61 @@
     return start1 < end2 && start2 < end1;
   }
 
-  /** Assign lanes to slots based on temporal overlap. Returns max concurrent heightFrac. */
+  /** Assign lanes to slots based on temporal overlap. Modifies slots to add lane property. */
   function assignLanes(slots) {
-    if (!slots || slots.length === 0) return 1;
+    if (!slots || slots.length === 0) return { maxLanes: 1, lanesUsed: [] };
     
-    // For each slot, find all other slots it overlaps with
-    // Calculate the max concurrent heightFrac at any point in time
-    let maxConcurrent = 0;
+    // Sort slots by start time
+    const sortedSlots = slots.slice().sort((a, b) => {
+      const aStart = a.mainStart || a.waitStart || 0;
+      const bStart = b.mainStart || b.waitStart || 0;
+      return aStart - bStart;
+    });
     
-    slots.forEach((slot) => {
-      // Skip slots with invalid heightFrac
-      if (!isFinite(slot.heightFrac) || slot.heightFrac <= 0) return;
+    // Track which lanes are occupied and when they'll be free
+    const lanes = []; // Each entry: { endTime, heightFrac }
+    
+    sortedSlots.forEach((slot) => {
+      if (!isFinite(slot.heightFrac) || slot.heightFrac <= 0) {
+        slot.lane = 0;
+        slot.laneHeightFrac = 0;
+        return;
+      }
       
-      let concurrent = slot.heightFrac;
       const slotStart = slot.mainStart || slot.waitStart;
       const slotEnd = slot.mainEnd || slot.waitEnd;
       
-      if (slotStart == null || slotEnd == null) return;
+      if (slotStart == null || slotEnd == null) {
+        slot.lane = 0;
+        slot.laneHeightFrac = slot.heightFrac;
+        return;
+      }
       
-      slots.forEach((other) => {
-        if (slot === other) return;
-        if (!isFinite(other.heightFrac) || other.heightFrac <= 0) return;
-        
-        const otherStart = other.mainStart || other.waitStart;
-        const otherEnd = other.mainEnd || other.waitEnd;
-        
-        if (intervalsOverlap(slotStart, slotEnd, otherStart, otherEnd)) {
-          concurrent += other.heightFrac;
+      // Find first available lane (where all jobs have ended before this one starts)
+      let assignedLane = -1;
+      for (let i = 0; i < lanes.length; i++) {
+        if (lanes[i].endTime <= slotStart) {
+          assignedLane = i;
+          break;
         }
-      });
+      }
       
-      maxConcurrent = Math.max(maxConcurrent, concurrent);
+      // If no lane available, create a new one
+      if (assignedLane === -1) {
+        assignedLane = lanes.length;
+        lanes.push({ endTime: slotEnd, heightFrac: slot.heightFrac });
+      } else {
+        lanes[assignedLane] = { endTime: slotEnd, heightFrac: slot.heightFrac };
+      }
+      
+      slot.lane = assignedLane;
+      slot.laneHeightFrac = slot.heightFrac;
     });
     
-    return maxConcurrent || 1;
+    // Calculate total height needed for all lanes
+    const totalHeightFrac = lanes.reduce((sum, lane) => sum + lane.heightFrac, 0);
+    
+    return { maxLanes: lanes.length, totalHeightFrac: totalHeightFrac || 1 };
   }
 
   function stackAndRender(rows, containerId, widthHint, rowHeights) {
@@ -349,8 +370,9 @@
       const chartEl = rowEl.querySelector(".row-chart");
       chartEl.style.height = rowHeight + "px";
 
-      const totalFrac = assignLanes(slots);
-      const scale = totalFrac <= 1 ? 1 : 1 / totalFrac;
+      const laneInfo = assignLanes(slots);
+      const maxLanes = laneInfo.maxLanes;
+      const laneHeight = rowHeight / maxLanes;
 
       const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
       svg.setAttribute("viewBox", `0 0 ${width} ${rowHeight}`);
@@ -367,9 +389,10 @@
         svg.appendChild(line);
       });
 
-      let y = 0;
       slots.forEach((slot) => {
-        const h = Math.max(0, rowHeight * slot.heightFrac * scale);
+        const lane = slot.lane || 0;
+        const y = lane * laneHeight;
+        const h = Math.max(0, laneHeight * slot.heightFrac);
         const job = slot.job;
         const labelStr = "#" + job.job_id + " · P=" + (job.priority != null ? job.priority : "—") + " · " + job.user + " · " + (job.job_name || job.job_id);
         const prefix = slot.unusual ? UNUSUAL_EMOJI + " " : "";
@@ -427,8 +450,6 @@
           pendingText.textContent = prefix + labelStr;
           svg.appendChild(pendingText);
         }
-
-        y += h;
       });
 
       chartEl.appendChild(svg);
