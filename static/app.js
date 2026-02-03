@@ -293,6 +293,39 @@
     return labels.map((_, i) => (i < nodeCount ? BASE_ROW_HEIGHT : BASE_ROW_HEIGHT * mult));
   }
 
+  /** Stack slots into lanes to prevent temporal overlap. */
+  function assignLanes(slots) {
+    const lanes = [];
+    slots.forEach((slot) => {
+      // Full time span: from wait start (or main start) to main end
+      const slotStart = slot.waitStart != null ? slot.waitStart : slot.mainStart;
+      const slotEnd = slot.mainEnd;
+      
+      // Find first available lane where this slot doesn't overlap
+      let lane = 0;
+      while (lane < lanes.length) {
+        const lastInLane = lanes[lane][lanes[lane].length - 1];
+        const lastStart = lastInLane.waitStart != null ? lastInLane.waitStart : lastInLane.mainStart;
+        const lastEnd = lastInLane.mainEnd;
+        
+        // Check if this slot starts after the last slot in this lane ends
+        if (lastEnd == null || slotStart >= lastEnd) {
+          break; // No overlap, can use this lane
+        }
+        lane++;
+      }
+      
+      // Create new lane if needed
+      if (lane >= lanes.length) {
+        lanes.push([]);
+      }
+      lanes[lane].push(slot);
+      slot.lane = lane;
+    });
+    
+    return lanes.length;
+  }
+
   function stackAndRender(rows, containerId, widthHint, rowHeights) {
     const container = document.getElementById(containerId);
     if (!container) return 0;
@@ -310,6 +343,10 @@
       rowEl.innerHTML = `<span class="row-label">${label}</span><div class="row-chart"></div>`;
       const chartEl = rowEl.querySelector(".row-chart");
       chartEl.style.height = rowHeight + "px";
+
+      // Assign lanes to prevent temporal overlap
+      const numLanes = assignLanes(slots);
+      const heightPerLane = rowHeight / Math.max(numLanes, 1);
 
       const totalFrac = slots.reduce((s, i) => s + i.heightFrac, 0) || 1;
       const scale = totalFrac <= 1 ? 1 : 1 / totalFrac;
@@ -329,9 +366,10 @@
         svg.appendChild(line);
       });
 
-      let y = 0;
       slots.forEach((slot) => {
-        const h = Math.max(0, rowHeight * slot.heightFrac * scale);
+        // Position based on assigned lane
+        const y = slot.lane * heightPerLane;
+        const h = Math.max(0, heightPerLane * slot.heightFrac * scale);
         const job = slot.job;
         const labelStr = "#" + job.job_id + " · P=" + (job.priority != null ? job.priority : "—") + " · " + job.user + " · " + (job.job_name || job.job_id);
         const prefix = slot.unusual ? UNUSUAL_EMOJI + " " : "";
@@ -384,8 +422,6 @@
           pendingText.textContent = prefix + labelStr;
           svg.appendChild(pendingText);
         }
-
-        y += h;
       });
 
       chartEl.appendChild(svg);
