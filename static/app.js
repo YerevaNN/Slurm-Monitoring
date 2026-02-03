@@ -281,7 +281,7 @@
     return rows;
   }
 
-  /** Pending row height multiplier: max(totalPendingGpus/8, totalPendingCpus/224, 1). Same for both halves. */
+  /** Pending row height multiplier: max(totalPendingGpus/8, totalPendingCpus/224, 1). Capped at 8x. */
   function getPendingRowMultiplier() {
     let totalGpus = 0;
     let totalCpus = 0;
@@ -291,7 +291,8 @@
         totalCpus += job.req_cpus || 0;
       }
     });
-    return Math.max(totalGpus / GPUS_PER_NODE, totalCpus / CPUS_PER_NODE, 1);
+    const multiplier = Math.max(totalGpus / GPUS_PER_NODE, totalCpus / CPUS_PER_NODE, 1);
+    return Math.min(multiplier, 8); // Cap at 8x to prevent excessive height
   }
 
   function getRowHeights() {
