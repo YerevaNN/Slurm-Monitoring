@@ -657,8 +657,7 @@
         state.gpusPerNode = data.gpus_per_node || GPUS_PER_NODE;
         state.cpusPerNode = data.cpus_per_node || CPUS_PER_NODE;
         render();
-        const modeLabel = state.historyMode ? " (history)" : "";
-        document.getElementById("last-updated").textContent = "Updated " + new Date().toLocaleTimeString() + modeLabel;
+        document.getElementById("last-updated").textContent = "Updated " + new Date().toLocaleTimeString();
       })
       .catch((err) => {
         console.error("Fetch error:", err);
