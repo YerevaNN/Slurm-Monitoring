@@ -345,8 +345,8 @@
           rect.classList.add("timeline-bar", "job-bar", "wait");
           if (slot.unusual) rect.classList.add("unusual");
           // Hide waiting period for finished jobs (show only on hover)
-          const isActive = job.state === "RUNNING" || job.state === "PENDING";
-          if (!isActive) {
+          const finishedStates = ["COMPLETED", "FAILED", "CANCELLED", "TIMEOUT", "COMPLETING", "NODE_FAIL", "PREEMPTED", "OUT_OF_MEMORY"];
+          if (finishedStates.includes(job.state)) {
             rect.classList.add("wait-historic");
           }
           svg.appendChild(rect);
@@ -446,7 +446,7 @@
       if (job.state === "PENDING") {
         gpusQueued += job.req_gpus || 0;
         cpusQueued += job.req_cpus || 0;
-      } else if (job.allocations && job.allocations.length) {
+      } else if (job.state === "RUNNING" && job.allocations && job.allocations.length) {
         job.allocations.forEach((a) => {
           gpusUsed += a.gpus || 0;
           cpusUsed += a.cpus || 0;
