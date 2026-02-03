@@ -288,6 +288,41 @@
     return labels.map((_, i) => (i < nodeCount ? BASE_ROW_HEIGHT : BASE_ROW_HEIGHT * mult));
   }
 
+  /** Check if two time intervals overlap. */
+  function intervalsOverlap(start1, end1, start2, end2) {
+    if (start1 == null || end1 == null || start2 == null || end2 == null) return false;
+    return start1 < end2 && start2 < end1;
+  }
+
+  /** Assign lanes to slots based on temporal overlap. Returns max concurrent heightFrac. */
+  function assignLanes(slots) {
+    // For each slot, find all other slots it overlaps with
+    // Calculate the max concurrent heightFrac at any point in time
+    let maxConcurrent = 0;
+    
+    slots.forEach((slot) => {
+      let concurrent = slot.heightFrac;
+      const slotStart = slot.mainStart || slot.waitStart;
+      const slotEnd = slot.mainEnd || slot.waitEnd;
+      
+      if (slotStart == null || slotEnd == null) return;
+      
+      slots.forEach((other) => {
+        if (slot === other) return;
+        const otherStart = other.mainStart || other.waitStart;
+        const otherEnd = other.mainEnd || other.waitEnd;
+        
+        if (intervalsOverlap(slotStart, slotEnd, otherStart, otherEnd)) {
+          concurrent += other.heightFrac;
+        }
+      });
+      
+      maxConcurrent = Math.max(maxConcurrent, concurrent);
+    });
+    
+    return maxConcurrent || 1;
+  }
+
   function stackAndRender(rows, containerId, widthHint, rowHeights) {
     const container = document.getElementById(containerId);
     if (!container) return 0;
@@ -306,7 +341,7 @@
       const chartEl = rowEl.querySelector(".row-chart");
       chartEl.style.height = rowHeight + "px";
 
-      const totalFrac = slots.reduce((s, i) => s + i.heightFrac, 0) || 1;
+      const totalFrac = assignLanes(slots);
       const scale = totalFrac <= 1 ? 1 : 1 / totalFrac;
 
       const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
