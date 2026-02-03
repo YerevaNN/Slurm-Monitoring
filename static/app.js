@@ -716,7 +716,7 @@
       state.timeMax = now + half;
     }
     const intervalSec = Math.floor(state.refreshIntervalMs / 1000);
-    const url = "/api/jobs?from=" + state.timeMin + "&to=" + state.timeMax + "&interval=" + intervalSec;
+    const url = "/api/jobs?from=" + Math.floor(state.timeMin) + "&to=" + Math.floor(state.timeMax) + "&interval=" + intervalSec;
     fetch(url)
       .then((r) => r.json())
       .then((data) => {
