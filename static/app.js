@@ -207,17 +207,6 @@
 
     const now = nowMs();
     const perNode = isGpu ? (state.gpusPerNode || GPUS_PER_NODE) : (state.cpusPerNode || CPUS_PER_NODE);
-    
-    // Calculate total pending resources for proper height scaling
-    let totalPendingGpus = 0;
-    let totalPendingCpus = 0;
-    state.jobs.forEach((j) => {
-      if (j.state === "PENDING") {
-        totalPendingGpus += j.req_gpus || 0;
-        totalPendingCpus += j.req_cpus || 0;
-      }
-    });
-    const totalPending = isGpu ? Math.max(totalPendingGpus, perNode) : Math.max(totalPendingCpus, perNode);
 
     state.jobs.forEach((job) => {
       const unusual = isUnusual(job.state);
@@ -248,8 +237,8 @@
         });
       } else if (job.state === "PENDING") {
         const size = isGpu ? (job.req_gpus || 0) : (job.req_cpus || 0);
-        // HeightFrac based on total pending resources, not per-node capacity
-        const heightFrac = size / totalPending;
+        // HeightFrac based on node capacity (same as running jobs)
+        const heightFrac = Math.min(1, size / perNode);
         const expectedMs = (job.time_limit_ms != null && job.time_limit_ms > 0) ? job.time_limit_ms : 3600000;
         rows["Pending"].push({
           job,
@@ -319,10 +308,6 @@
       return aStart - bStart;
     });
     
-    const nodeName = sortedSlots[0]?.job?.allocations?.[0]?.node;
-    const shouldLog = nodeName === 'dgx' && sortedSlots.length > 10;
-    if (shouldLog) console.log(`[Lane Debug] Processing ${sortedSlots.length} slots for node ${nodeName}`);
-    
     // Track which lanes are occupied and when they'll be free
     const lanes = []; // Each entry: { endTime, heightFrac }
     
@@ -373,11 +358,6 @@
     // Calculate total height needed for all lanes
     const totalHeightFrac = lanes.reduce((sum, lane) => sum + lane.heightFrac, 0);
     
-    if (shouldLog) {
-      console.log(`[Lane Debug] Created ${lanes.length} lanes for ${sortedSlots.length} jobs`);
-      console.log(`[Lane Debug] First 5 jobs: ${sortedSlots.slice(0, 5).map(s => `${s.job.job_id}[lane ${s.lane}]`).join(', ')}`);
-    }
-    
     return { maxLanes: lanes.length, totalHeightFrac: totalHeightFrac || 1 };
   }
 
@@ -402,30 +382,35 @@
       // Number of lanes = number of resources (GPUs or CPUs) - fixed, not calculated
       const isGpuSide = containerId.includes("gpu");
       const perNode = isGpuSide ? (state.gpusPerNode || GPUS_PER_NODE) : (state.cpusPerNode || CPUS_PER_NODE);
-      const numLanes = label === "Pending" ? 1 : perNode;
+      const isPendingRow = label === "Pending";
+      const numLanes = isPendingRow ? 1 : perNode;
       const laneHeight = rowHeight / numLanes;
       
-      // Assign lane positions for jobs (to avoid visual overlap)
-      assignLanes(slots);
+      // Assign lane positions for jobs (to avoid visual overlap) - only for node rows
+      if (!isPendingRow) {
+        assignLanes(slots);
+      }
 
       const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
       svg.setAttribute("viewBox", `0 0 ${width} ${rowHeight}`);
       svg.setAttribute("preserveAspectRatio", "none");
 
       const ticks = getTimeTicks(width);
-      ticks.forEach(({ x, label }) => {
+      ticks.forEach(({ x, label: tickLabel }) => {
         const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
         line.setAttribute("x1", x);
         line.setAttribute("y1", 0);
         line.setAttribute("x2", x);
         line.setAttribute("y2", rowHeight);
-        line.setAttribute("class", label === "now" ? "guideline guideline-now" : "guideline");
+        line.setAttribute("class", tickLabel === "now" ? "guideline guideline-now" : "guideline");
         svg.appendChild(line);
       });
 
+      // For pending row: cumulative y stacking. For node rows: lane-based positioning.
+      let cumulativeY = 0;
       slots.forEach((slot) => {
         const lane = slot.lane || 0;
-        const y = lane * laneHeight;
+        const y = isPendingRow ? cumulativeY : (lane * laneHeight);
         // Height is based on resource usage relative to TOTAL row, not relative to lane
         const h = Math.max(0, rowHeight * slot.heightFrac);
         const job = slot.job;
@@ -485,6 +470,9 @@
           pendingText.textContent = prefix + labelStr;
           svg.appendChild(pendingText);
         }
+        
+        // For pending row, stack jobs vertically
+        if (isPendingRow) cumulativeY += h;
       });
 
       chartEl.appendChild(svg);
