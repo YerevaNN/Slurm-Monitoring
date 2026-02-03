@@ -747,6 +747,20 @@
     startRefresh();
   });
 
+  // Populate date/time inputs with current time on load
+  const now = new Date();
+  const dateInput = document.getElementById("history-date");
+  const timeInput = document.getElementById("history-time");
+  
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  dateInput.value = `${year}-${month}-${day}`;
+  
+  const hours = String(now.getHours()).padStart(2, '0');
+  const minutes = String(now.getMinutes()).padStart(2, '0');
+  timeInput.value = `${hours}:${minutes}`;
+
   setTimeRange(12);
   fetchJobs();
   startRefresh();
