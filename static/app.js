@@ -206,7 +206,7 @@
     getRowLabels().forEach((label) => { rows[label] = []; });
 
     const now = nowMs();
-    const perNode = isGpu ? state.gpusPerNode : state.cpusPerNode;
+    const perNode = isGpu ? (state.gpusPerNode || GPUS_PER_NODE) : (state.cpusPerNode || CPUS_PER_NODE);
 
     state.jobs.forEach((job) => {
       const unusual = isUnusual(job.state);
@@ -219,8 +219,9 @@
         job.allocations.forEach((alloc) => {
           const node = alloc.node;
           if (!rows[node]) return;
-          const size = isGpu ? alloc.gpus : alloc.cpus;
-          const heightFrac = size / perNode;
+          const size = isGpu ? (alloc.gpus || 0) : (alloc.cpus || 0);
+          if (size <= 0) return; // Skip if no resources allocated
+          const heightFrac = Math.min(1, size / perNode);
           const sortTime = start || submit || 0;
           rows[node].push({
             job,
@@ -296,11 +297,16 @@
 
   /** Assign lanes to slots based on temporal overlap. Returns max concurrent heightFrac. */
   function assignLanes(slots) {
+    if (!slots || slots.length === 0) return 1;
+    
     // For each slot, find all other slots it overlaps with
     // Calculate the max concurrent heightFrac at any point in time
     let maxConcurrent = 0;
     
     slots.forEach((slot) => {
+      // Skip slots with invalid heightFrac
+      if (!isFinite(slot.heightFrac) || slot.heightFrac <= 0) return;
+      
       let concurrent = slot.heightFrac;
       const slotStart = slot.mainStart || slot.waitStart;
       const slotEnd = slot.mainEnd || slot.waitEnd;
@@ -309,6 +315,8 @@
       
       slots.forEach((other) => {
         if (slot === other) return;
+        if (!isFinite(other.heightFrac) || other.heightFrac <= 0) return;
+        
         const otherStart = other.mainStart || other.waitStart;
         const otherEnd = other.mainEnd || other.waitEnd;
         
