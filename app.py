@@ -106,11 +106,7 @@ def run_recorder_cycle():
     """One recorder cycle: fetch, upsert, close stale, cleanup."""
     try:
         now_ms = int(time.time() * 1000)
-        print(f"[Recorder] Starting cycle at {now_ms}")
-        
         jobs = fetch_jobs()
-        print(f"[Recorder] Fetched {len(jobs)} jobs from Slurm")
-        
         nodes = fetch_nodes()
         node_states, node_reasons = fetch_node_states()
         gpus_per_node, cpus_per_node = fetch_node_capacities()
@@ -123,16 +119,14 @@ def run_recorder_cycle():
         history.upsert_jobs(config.HISTORY_DB_PATH, jobs, now_ms)
         history.update_meta(config.HISTORY_DB_PATH, nodes, node_states, node_reasons,
                            gpus_per_node, cpus_per_node, now_ms)
-        print(f"[Recorder] Upserted jobs to DB")
         
         interval = get_recorder_interval()
         stale_threshold = now_ms - (2 * interval * 1000)
         history.close_stale_jobs(config.HISTORY_DB_PATH, stale_threshold, get_job_final_info)
         
         history.cleanup(config.HISTORY_DB_PATH, config.HISTORY_RETENTION_DAYS)
-        print(f"[Recorder] Cycle complete")
     except Exception as e:
-        print(f"[Recorder] ERROR: {e}")
+        print(f"Recorder error: {e}")
         import traceback
         traceback.print_exc()
 
