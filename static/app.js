@@ -387,7 +387,11 @@
       chartEl.style.height = rowHeight + "px";
 
       const laneInfo = assignLanes(slots);
-      const maxLanes = laneInfo.maxLanes;
+      // Cap lanes at resource capacity (e.g., 8 GPUs = max 8 concurrent jobs = max 8 lanes)
+      const isGpuSide = containerId.includes("gpu");
+      const perNode = isGpuSide ? (state.gpusPerNode || GPUS_PER_NODE) : (state.cpusPerNode || CPUS_PER_NODE);
+      const resourceCapacity = label === "Pending" ? Infinity : perNode;
+      const maxLanes = Math.min(laneInfo.maxLanes, resourceCapacity);
       const laneHeight = rowHeight / maxLanes;
 
       const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -408,7 +412,8 @@
       slots.forEach((slot) => {
         const lane = slot.lane || 0;
         const y = lane * laneHeight;
-        const h = Math.max(0, laneHeight * slot.heightFrac);
+        // Height is based on resource usage relative to TOTAL row, not relative to lane
+        const h = Math.max(0, rowHeight * slot.heightFrac);
         const job = slot.job;
         const labelStr = "#" + job.job_id + " · P=" + (job.priority != null ? job.priority : "—") + " · " + job.user + " · " + (job.job_name || job.job_id);
         const prefix = slot.unusual ? UNUSUAL_EMOJI + " " : "";
