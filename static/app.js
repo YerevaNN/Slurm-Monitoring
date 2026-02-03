@@ -612,6 +612,10 @@
       tooltip.classList.remove("visible");
       tooltip.setAttribute("aria-hidden", "true");
       if (jobId) document.querySelectorAll('[data-job-id="' + CSS.escape(jobId) + '"]').forEach((el) => el.classList.remove("highlight"));
+      // Hide historic waiting bars again
+      document.querySelectorAll(".wait-historic").forEach((el) => {
+        el.style.opacity = "";
+      });
     };
     containers.forEach((id) => {
       const el = document.getElementById(id);
