@@ -201,7 +201,7 @@ def get_jobs_in_window(db_path: str, from_ms: int, to_ms: int) -> list[dict[str,
 
 def close_stale_jobs(db_path: str, stale_threshold_ms: int, get_final_info_fn):
     """
-    Close jobs where last_seen_ms < stale_threshold_ms and end_time_ms IS NULL.
+    Close jobs where last_seen_ms < stale_threshold_ms and state is RUNNING or PENDING.
     For each, call get_final_info_fn(job_id) -> (state, end_time_ms).
     """
     with _db_lock:
@@ -209,7 +209,7 @@ def close_stale_jobs(db_path: str, stale_threshold_ms: int, get_final_info_fn):
         try:
             cursor = conn.execute("""
                 SELECT id, job_id, last_seen_ms FROM jobs
-                WHERE last_seen_ms < ? AND end_time_ms IS NULL
+                WHERE last_seen_ms < ? AND state IN ('RUNNING', 'PENDING')
             """, (stale_threshold_ms,))
             stale_rows = cursor.fetchall()
             
