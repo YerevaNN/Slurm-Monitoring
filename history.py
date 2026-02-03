@@ -188,6 +188,11 @@ def get_jobs_in_window(db_path: str, from_ms: int, to_ms: int) -> list[dict[str,
                 job["allocations"] = json.loads(job.pop("allocations_json", "[]"))
                 job.pop("id", None)
                 job.pop("last_seen_ms", None)
+                # Rename fields to match frontend expectations (remove _ms suffix)
+                job["start_time"] = job.pop("start_time_ms", None)
+                job["end_time"] = job.pop("end_time_ms", None)
+                job["submit_time"] = job.pop("submit_time_ms", None)
+                job["time_limit_ms"] = job.get("time_limit_ms")  # Keep _ms suffix for this one
                 jobs.append(job)
             return jobs
         finally:
