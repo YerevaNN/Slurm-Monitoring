@@ -207,6 +207,17 @@
 
     const now = nowMs();
     const perNode = isGpu ? (state.gpusPerNode || GPUS_PER_NODE) : (state.cpusPerNode || CPUS_PER_NODE);
+    
+    // Calculate total pending resources for proper height scaling
+    let totalPendingGpus = 0;
+    let totalPendingCpus = 0;
+    state.jobs.forEach((j) => {
+      if (j.state === "PENDING") {
+        totalPendingGpus += j.req_gpus || 0;
+        totalPendingCpus += j.req_cpus || 0;
+      }
+    });
+    const totalPending = isGpu ? Math.max(totalPendingGpus, perNode) : Math.max(totalPendingCpus, perNode);
 
     state.jobs.forEach((job) => {
       const unusual = isUnusual(job.state);
@@ -236,8 +247,9 @@
           });
         });
       } else if (job.state === "PENDING") {
-        const size = isGpu ? job.req_gpus : job.req_cpus;
-        const heightFrac = Math.min(1, size / perNode);
+        const size = isGpu ? (job.req_gpus || 0) : (job.req_cpus || 0);
+        // HeightFrac based on total pending resources, not per-node capacity
+        const heightFrac = size / totalPending;
         const expectedMs = (job.time_limit_ms != null && job.time_limit_ms > 0) ? job.time_limit_ms : 3600000;
         rows["Pending"].push({
           job,
