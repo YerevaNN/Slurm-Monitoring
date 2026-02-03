@@ -98,12 +98,11 @@ body {
 }
 
 .controls #history-date {
-  width: 160px;
+  width: 135px;
 }
 
-.controls #history-date::placeholder {
-  color: var(--text-muted);
-  opacity: 0.6;
+.controls #history-time {
+  width: 90px;
 }
 
 .controls #view-history,
