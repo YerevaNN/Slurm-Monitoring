@@ -71,8 +71,8 @@ def _parse_alloc_tres(alloc_tres: str) -> int:
 
 
 def _fill_gpus_from_scontrol(jobs: list[dict[str, Any]]) -> None:
-    """For jobs with allocations but 0 GPUs (squeue %b N/A), set GPU count from scontrol show job AllocTRES/ReqTRES."""
-    need = [j["job_id"] for j in jobs if j.get("allocations") and j.get("req_gpus", 0) == 0]
+    """For jobs with 0 GPUs (squeue %b N/A), set GPU count from scontrol show job ReqTRES/AllocTRES."""
+    need = [j["job_id"] for j in jobs if j.get("req_gpus", 0) == 0]
     if not need:
         return
     # scontrol show job accepts only one job ID per call on many Slurm versions
@@ -93,11 +93,15 @@ def _fill_gpus_from_scontrol(jobs: list[dict[str, Any]]) -> None:
             return
         for j in jobs:
             if j["job_id"] == jid:
-                j["req_gpus"] = g
-                num_nodes = max(1, len(j["allocations"]))
-                gpus_per_node = g // num_nodes
-                for a in j["allocations"]:
-                    a["gpus"] = gpus_per_node
+                # Update req_gpus (multiply by array task count for display)
+                array_tasks = j.get("array_task_count", 1)
+                j["req_gpus"] = g * array_tasks
+                # Update allocations if present
+                if j.get("allocations"):
+                    num_nodes = max(1, len(j["allocations"]))
+                    gpus_per_node = g // num_nodes
+                    for a in j["allocations"]:
+                        a["gpus"] = gpus_per_node
                 applied.add(jid)
                 break
 
