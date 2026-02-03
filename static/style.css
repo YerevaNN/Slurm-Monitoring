@@ -81,6 +81,7 @@ body {
   background: var(--border);
 }
 
+.controls #history-preset,
 .controls #history-date {
   background: var(--bg);
   border: 1px solid var(--border);
@@ -90,6 +91,14 @@ body {
   font: inherit;
   font-size: 11px;
   cursor: pointer;
+}
+
+.controls #history-preset {
+  min-width: 120px;
+}
+
+.controls #history-date {
+  width: 180px;
 }
 
 .controls #view-history,

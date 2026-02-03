@@ -19,7 +19,18 @@
       </select>
       <button id="zoom-out" type="button" aria-label="Zoom out">−</button>
       <button id="zoom-in" type="button" aria-label="Zoom in">+</button>
-      <input type="datetime-local" id="history-date" aria-label="View date/time" />
+      <select id="history-preset" aria-label="Quick history">
+        <option value="">Jump to...</option>
+        <option value="1">1 hour ago</option>
+        <option value="3">3 hours ago</option>
+        <option value="6">6 hours ago</option>
+        <option value="12">12 hours ago</option>
+        <option value="24">1 day ago</option>
+        <option value="48">2 days ago</option>
+        <option value="72">3 days ago</option>
+        <option value="168">1 week ago</option>
+      </select>
+      <input type="datetime-local" id="history-date" aria-label="Custom date/time" step="60" />
       <button id="view-history" type="button" aria-label="View history">View</button>
       <button id="live-mode" type="button" aria-label="Live mode">Live</button>
       <span id="last-updated" class="last-updated"></span>

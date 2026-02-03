@@ -664,6 +664,18 @@
     state.refreshTimer = setInterval(fetchJobs, state.refreshIntervalMs);
   }
 
+  function viewHistoryAt(timestampMs) {
+    const halfWindow = 12 * 60 * 60 * 1000;
+    state.historyMode = true;
+    state.timeMin = timestampMs - halfWindow;
+    state.timeMax = timestampMs + halfWindow;
+    if (state.refreshTimer) {
+      clearInterval(state.refreshTimer);
+      state.refreshTimer = null;
+    }
+    fetchJobs();
+  }
+
   function viewHistory() {
     const dateInput = document.getElementById("history-date");
     if (!dateInput.value) {
@@ -676,15 +688,7 @@
       alert("Invalid date/time");
       return;
     }
-    const halfWindow = 12 * 60 * 60 * 1000;
-    state.historyMode = true;
-    state.timeMin = pickedMs - halfWindow;
-    state.timeMax = pickedMs + halfWindow;
-    if (state.refreshTimer) {
-      clearInterval(state.refreshTimer);
-      state.refreshTimer = null;
-    }
-    fetchJobs();
+    viewHistoryAt(pickedMs);
   }
 
   function goLive() {
@@ -698,6 +702,14 @@
   document.getElementById("zoom-out").addEventListener("click", () => zoom(-1));
   document.getElementById("view-history").addEventListener("click", viewHistory);
   document.getElementById("live-mode").addEventListener("click", goLive);
+  document.getElementById("history-preset").addEventListener("change", (e) => {
+    const hoursAgo = parseInt(e.target.value, 10);
+    if (hoursAgo) {
+      const timestampMs = Date.now() - (hoursAgo * 60 * 60 * 1000);
+      viewHistoryAt(timestampMs);
+      e.target.value = ""; // Reset dropdown
+    }
+  });
   document.getElementById("refresh-interval").addEventListener("change", (e) => {
     state.refreshIntervalMs = parseInt(e.target.value, 10) * 1000;
     startRefresh();
