@@ -71,29 +71,51 @@ def _parse_alloc_tres(alloc_tres: str) -> int:
 
 
 def _fill_gpus_from_scontrol(jobs: list[dict[str, Any]]) -> None:
-    """For jobs with allocations but 0 GPUs (squeue %b N/A), set GPU count from scontrol show job AllocTRES."""
+    """For jobs with allocations but 0 GPUs (squeue %b N/A), set GPU count from scontrol show job AllocTRES/ReqTRES."""
     need = [j["job_id"] for j in jobs if j.get("allocations") and j.get("req_gpus", 0) == 0]
     if not need:
         return
-    out = _run(["scontrol", "show", "job"] + need)
+    # scontrol show job accepts only one job ID per call on many Slurm versions
+    out_parts = []
+    for jid in need:
+        o = _run(["scontrol", "show", "job", jid])
+        if o:
+            out_parts.append(o)
+    out = "\n\n".join(out_parts)
     if not out:
         return
     current_job_id = None
+    req_tres_gpus: dict[str, int] = {}
+    applied: set[str] = set()
+
+    def apply_gpus(jid: str, g: int) -> None:
+        if g == 0:
+            return
+        for j in jobs:
+            if j["job_id"] == jid:
+                j["req_gpus"] = g
+                num_nodes = max(1, len(j["allocations"]))
+                gpus_per_node = g // num_nodes
+                for a in j["allocations"]:
+                    a["gpus"] = gpus_per_node
+                applied.add(jid)
+                break
+
     for line in out.splitlines():
         line = line.strip()
         if line.startswith("JobId="):
+            if current_job_id and current_job_id not in applied and req_tres_gpus.get(current_job_id):
+                apply_gpus(current_job_id, req_tres_gpus[current_job_id])
             current_job_id = line.split("=", 1)[1].split()[0].rstrip(",")
+        elif current_job_id and line.startswith("ReqTRES="):
+            req_tres_gpus[current_job_id] = _parse_alloc_tres(line.split("=", 1)[1].strip())
         elif current_job_id and line.startswith("AllocTRES="):
-            gpus = _parse_alloc_tres(line.split("=", 1)[1].strip())
-            for j in jobs:
-                if j["job_id"] == current_job_id:
-                    j["req_gpus"] = gpus
-                    num_nodes = max(1, len(j["allocations"]))
-                    gpus_per_node = gpus // num_nodes
-                    for a in j["allocations"]:
-                        a["gpus"] = gpus_per_node
-                    break
+            parsed = _parse_alloc_tres(line.split("=", 1)[1].strip())
+            gpus = parsed if parsed else req_tres_gpus.get(current_job_id, 0)
+            apply_gpus(current_job_id, gpus)
             current_job_id = None
+    if current_job_id and current_job_id not in applied and req_tres_gpus.get(current_job_id):
+        apply_gpus(current_job_id, req_tres_gpus[current_job_id])
 
 
 def _array_task_count(job_id: str) -> int:
