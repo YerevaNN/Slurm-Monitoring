@@ -634,9 +634,16 @@
   }
 
   function fetchJobs() {
-    // Update time range first for live mode
+    // Update time range first for live mode, preserving zoom level
     if (!state.historyMode) {
-      setTimeRange(12);
+      const currentSpan = state.timeMax - state.timeMin;
+      const defaultSpan = 12 * 60 * 60 * 1000;
+      // Use current span if user has zoomed, otherwise use default
+      const span = (currentSpan > 0 && currentSpan !== defaultSpan * 2) ? currentSpan : defaultSpan * 2;
+      const now = nowMs();
+      const half = span / 2;
+      state.timeMin = now - half;
+      state.timeMax = now + half;
     }
     const intervalSec = Math.floor(state.refreshIntervalMs / 1000);
     const url = "/api/jobs?from=" + state.timeMin + "&to=" + state.timeMax + "&interval=" + intervalSec;
