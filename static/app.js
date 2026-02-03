@@ -710,6 +710,23 @@
   function goLive() {
     state.historyMode = false;
     setTimeRange(12);
+    
+    // Populate date/time inputs with current time
+    const now = new Date();
+    const dateInput = document.getElementById("history-date");
+    const timeInput = document.getElementById("history-time");
+    
+    // Format: YYYY-MM-DD for date input
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    dateInput.value = `${year}-${month}-${day}`;
+    
+    // Format: HH:MM for time input
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    timeInput.value = `${hours}:${minutes}`;
+    
     fetchJobs();
     startRefresh();
   }
