@@ -678,17 +678,30 @@
 
   function viewHistory() {
     const dateInput = document.getElementById("history-date");
-    if (!dateInput.value) {
-      alert("Please select a date/time");
+    const value = dateInput.value.trim();
+    if (!value) {
+      alert("Please enter a date/time (DD-MM-YYYY HH:MM)");
       return;
     }
-    const picked = new Date(dateInput.value);
+    
+    // Parse DD-MM-YYYY HH:MM format
+    const match = value.match(/^(\d{1,2})-(\d{1,2})-(\d{4})\s+(\d{1,2}):(\d{2})$/);
+    if (!match) {
+      alert("Invalid format. Use: DD-MM-YYYY HH:MM (e.g., 03-02-2026 14:30)");
+      return;
+    }
+    
+    const [, day, month, year, hour, minute] = match;
+    const picked = new Date(parseInt(year), parseInt(month) - 1, parseInt(day), parseInt(hour), parseInt(minute));
     const pickedMs = picked.getTime();
+    
     if (isNaN(pickedMs)) {
-      alert("Invalid date/time");
+      alert("Invalid date/time values");
       return;
     }
+    
     viewHistoryAt(pickedMs);
+    dateInput.value = ""; // Clear input after use
   }
 
   function goLive() {
