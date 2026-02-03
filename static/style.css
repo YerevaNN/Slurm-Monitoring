@@ -82,7 +82,8 @@ body {
 }
 
 .controls #history-preset,
-.controls #history-date {
+.controls #history-date,
+.controls #history-time {
   background: var(--bg);
   border: 1px solid var(--border);
   color: var(--text);
@@ -94,15 +95,15 @@ body {
 }
 
 .controls #history-preset {
-  min-width: 120px;
+  min-width: 130px;
 }
 
 .controls #history-date {
-  width: 135px;
+  width: 140px;
 }
 
 .controls #history-time {
-  width: 90px;
+  width: 95px;
 }
 
 .controls #view-history,

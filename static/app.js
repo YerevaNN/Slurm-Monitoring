@@ -705,10 +705,6 @@
     }
     
     viewHistoryAt(pickedMs);
-    
-    // Clear inputs after use
-    dateInput.value = "";
-    timeInput.value = "";
   }
 
   function goLive() {
