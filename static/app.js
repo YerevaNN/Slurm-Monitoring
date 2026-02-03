@@ -306,6 +306,10 @@
       return aStart - bStart;
     });
     
+    const nodeName = sortedSlots[0]?.job?.allocations?.[0]?.node;
+    const shouldLog = nodeName === 'dgx' && sortedSlots.length > 10;
+    if (shouldLog) console.log(`[Lane Debug] Processing ${sortedSlots.length} slots for node ${nodeName}`);
+    
     // Track which lanes are occupied and when they'll be free
     const lanes = []; // Each entry: { endTime, heightFrac }
     
@@ -355,6 +359,11 @@
     
     // Calculate total height needed for all lanes
     const totalHeightFrac = lanes.reduce((sum, lane) => sum + lane.heightFrac, 0);
+    
+    if (shouldLog) {
+      console.log(`[Lane Debug] Created ${lanes.length} lanes for ${sortedSlots.length} jobs`);
+      console.log(`[Lane Debug] First 5 jobs: ${sortedSlots.slice(0, 5).map(s => `${s.job.job_id}[lane ${s.lane}]`).join(', ')}`);
+    }
     
     return { maxLanes: lanes.length, totalHeightFrac: totalHeightFrac || 1 };
   }
