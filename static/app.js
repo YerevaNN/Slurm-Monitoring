@@ -201,6 +201,11 @@
 
     const now = nowMs();
     const perNode = isGpu ? state.gpusPerNode : state.cpusPerNode;
+    
+    console.log(`[DEBUG] buildRows(isGpu=${isGpu}) - now:`, now, new Date(now).toISOString());
+    console.log("[DEBUG] timeMin:", state.timeMin, new Date(state.timeMin).toISOString());
+    console.log("[DEBUG] timeMax:", state.timeMax, new Date(state.timeMax).toISOString());
+    console.log("[DEBUG] Processing", state.jobs.length, "jobs");
 
     state.jobs.forEach((job) => {
       const unusual = isUnusual(job.state);
@@ -210,12 +215,17 @@
       const submit = job.submit_time;
 
       if (job.allocations && job.allocations.length) {
+        console.log(`[DEBUG] Job ${job.job_id} (${job.state}) - allocations:`, job.allocations, `start: ${start} (${new Date(start).toISOString()}), end: ${end} (${new Date(end).toISOString()})`);
         job.allocations.forEach((alloc) => {
           const node = alloc.node;
-          if (!rows[node]) return;
+          if (!rows[node]) {
+            console.warn(`[DEBUG] No row for node: ${node}`);
+            return;
+          }
           const size = isGpu ? alloc.gpus : alloc.cpus;
           const heightFrac = size / perNode;
           const sortTime = start || submit || 0;
+          console.log(`[DEBUG] Adding job ${job.job_id} to row ${node}, heightFrac: ${heightFrac}, mainStart: ${start}, mainEnd: ${end}`);
           rows[node].push({
             job,
             sortTime,
@@ -232,6 +242,7 @@
         const size = isGpu ? job.req_gpus : job.req_cpus;
         const heightFrac = Math.min(1, size / perNode);
         const expectedMs = (job.time_limit_ms != null && job.time_limit_ms > 0) ? job.time_limit_ms : 3600000;
+        console.log(`[DEBUG] Job ${job.job_id} PENDING - submit: ${submit} (${new Date(submit).toISOString()})`);
         rows["Pending"].push({
           job,
           sortTime: submit || now,
@@ -626,6 +637,12 @@
     }
     const intervalSec = Math.floor(state.refreshIntervalMs / 1000);
     const url = "/api/jobs?from=" + state.timeMin + "&to=" + state.timeMax + "&interval=" + intervalSec;
+    console.log("[DEBUG] Fetching jobs with window:", {
+      from: new Date(state.timeMin).toISOString(),
+      to: new Date(state.timeMax).toISOString(),
+      fromMs: state.timeMin,
+      toMs: state.timeMax
+    });
     fetch(url)
       .then((r) => r.json())
       .then((data) => {
@@ -635,11 +652,18 @@
         state.node_reasons = data.node_reasons || {};
         state.gpusPerNode = data.gpus_per_node || GPUS_PER_NODE;
         state.cpusPerNode = data.cpus_per_node || CPUS_PER_NODE;
+        console.log("[DEBUG] Received data:", {
+          jobCount: state.jobs.length,
+          nodes: state.nodes,
+          runningJobs: state.jobs.filter(j => j.state === "RUNNING").length,
+          pendingJobs: state.jobs.filter(j => j.state === "PENDING").length
+        });
         render();
         const modeLabel = state.historyMode ? " (history)" : "";
         document.getElementById("last-updated").textContent = "Updated " + new Date().toLocaleTimeString() + modeLabel;
       })
-      .catch(() => {
+      .catch((err) => {
+        console.error("[DEBUG] Fetch error:", err);
         document.getElementById("last-updated").textContent = "Update failed";
       });
   }
