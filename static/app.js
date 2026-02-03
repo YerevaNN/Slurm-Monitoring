@@ -386,13 +386,14 @@
       const chartEl = rowEl.querySelector(".row-chart");
       chartEl.style.height = rowHeight + "px";
 
-      const laneInfo = assignLanes(slots);
-      // Cap lanes at resource capacity (e.g., 8 GPUs = max 8 concurrent jobs = max 8 lanes)
+      // Number of lanes = number of resources (GPUs or CPUs) - fixed, not calculated
       const isGpuSide = containerId.includes("gpu");
       const perNode = isGpuSide ? (state.gpusPerNode || GPUS_PER_NODE) : (state.cpusPerNode || CPUS_PER_NODE);
-      const resourceCapacity = label === "Pending" ? Infinity : perNode;
-      const maxLanes = Math.min(laneInfo.maxLanes, resourceCapacity);
-      const laneHeight = rowHeight / maxLanes;
+      const numLanes = label === "Pending" ? 1 : perNode;
+      const laneHeight = rowHeight / numLanes;
+      
+      // Assign lane positions for jobs (to avoid visual overlap)
+      assignLanes(slots);
 
       const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
       svg.setAttribute("viewBox", `0 0 ${width} ${rowHeight}`);
