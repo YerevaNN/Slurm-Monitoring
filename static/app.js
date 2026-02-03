@@ -383,13 +383,16 @@
       const isGpuSide = containerId.includes("gpu");
       const perNode = isGpuSide ? (state.gpusPerNode || GPUS_PER_NODE) : (state.cpusPerNode || CPUS_PER_NODE);
       const isPendingRow = label === "Pending";
-      const numLanes = isPendingRow ? 1 : perNode;
-      const laneHeight = rowHeight / numLanes;
       
-      // Assign lane positions for jobs (to avoid visual overlap) - only for node rows
+      // For node rows, check if there are overlapping jobs (need stacking)
+      let useCumulativeStacking = isPendingRow;
       if (!isPendingRow) {
-        assignLanes(slots);
+        const laneInfo = assignLanes(slots);
+        // If multiple lanes needed, use cumulative stacking to avoid visual overlap
+        useCumulativeStacking = laneInfo.maxLanes > 1;
       }
+      const numLanes = useCumulativeStacking ? 1 : perNode;
+      const laneHeight = rowHeight / numLanes;
 
       const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
       svg.setAttribute("viewBox", `0 0 ${width} ${rowHeight}`);
@@ -406,12 +409,12 @@
         svg.appendChild(line);
       });
 
-      // For pending row: cumulative y stacking. For node rows: lane-based positioning.
+      // For overlapping jobs: cumulative y stacking. For non-overlapping: lane-based positioning.
       let cumulativeY = 0;
       slots.forEach((slot) => {
         const lane = slot.lane || 0;
-        const y = isPendingRow ? cumulativeY : (lane * laneHeight);
-        // Height is based on resource usage relative to TOTAL row, not relative to lane
+        const y = useCumulativeStacking ? cumulativeY : (lane * laneHeight);
+        // Height is based on resource usage relative to TOTAL row
         const h = Math.max(0, rowHeight * slot.heightFrac);
         const job = slot.job;
         const labelStr = "#" + job.job_id + " · P=" + (job.priority != null ? job.priority : "—") + " · " + job.user + " · " + (job.job_name || job.job_id);
@@ -471,8 +474,8 @@
           svg.appendChild(pendingText);
         }
         
-        // For pending row, stack jobs vertically
-        if (isPendingRow) cumulativeY += h;
+        // For cumulative stacking (pending or overlapping jobs), increment y
+        if (useCumulativeStacking) cumulativeY += h;
       });
 
       chartEl.appendChild(svg);
