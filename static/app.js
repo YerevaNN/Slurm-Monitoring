@@ -239,7 +239,10 @@
           if (!rows[node]) return;
           const size = isGpu ? (alloc.gpus || 0) : (alloc.cpus || 0);
           if (size <= 0) return; // Skip if no resources allocated
-          const heightFrac = Math.min(1, size / perNode);
+          // Use min(allocated, requested) for height so 1-CPU job doesn't show as whole-node height
+          const req = isGpu ? (job.req_gpus || 0) : (job.req_cpus || 0);
+          const sizeForHeight = req > 0 ? Math.min(size, req) : size;
+          const heightFrac = Math.min(1, sizeForHeight / perNode);
           const sortTime = start || submit || 0;
           rows[node].push({
             job,
@@ -315,73 +318,72 @@
     return start1 < end2 && start2 < end1;
   }
 
-  /** Assign lanes to slots based on temporal overlap. Modifies slots to add lane property. */
-  function assignLanes(slots) {
+  /** Assign lanes to slots based on temporal overlap. Slots get lane + laneCount. Scale by perNode but cap display lanes so CPU (224) and GPU (8) rows look comparable. */
+  function assignLanes(slots, perNode) {
     if (!slots || slots.length === 0) return { maxLanes: 1, lanesUsed: [] };
+    const pn = perNode || 8;
+    // Full node = same lane count for GPU and CPU; cap so CPU doesn't use 224 lanes
+    const DISPLAY_LANES_PER_NODE = 8;
+    const scale = Math.min(pn, DISPLAY_LANES_PER_NODE);
     
-    // Sort slots by start time
     const sortedSlots = slots.slice().sort((a, b) => {
       const aStart = a.mainStart || a.waitStart || 0;
       const bStart = b.mainStart || b.waitStart || 0;
       return aStart - bStart;
     });
     
-    // Track which lanes are occupied and when they'll be free
-    const lanes = []; // Each entry: { endTime, heightFrac }
+    const lanes = [];
     
     sortedSlots.forEach((slot) => {
       if (!isFinite(slot.heightFrac) || slot.heightFrac <= 0) {
         slot.lane = 0;
+        slot.laneCount = 1;
         slot.laneHeightFrac = 0;
         return;
       }
       
-      // For lane assignment, use main period (running jobs) or wait period (pending jobs)
-      // Don't include waiting periods of finished jobs to avoid unnecessary lane creation
       const slotStart = slot.mainStart || slot.waitStart;
       const slotEnd = slot.mainEnd || slot.waitEnd;
-      
       if (slotStart == null || slotEnd == null) {
         slot.lane = 0;
+        slot.laneCount = 1;
         slot.laneHeightFrac = slot.heightFrac;
         return;
       }
       
-      // For finished jobs with both wait and main periods, only check main period overlap
       const useMainOnly = slot.mainStart != null && slot.mainEnd != null;
       const checkStart = useMainOnly ? slot.mainStart : slotStart;
       const checkEnd = useMainOnly ? slot.mainEnd : slotEnd;
       
-      // Find first available lane (where all jobs have ended before this one starts)
-      let assignedLane = -1;
-      for (let i = 0; i < lanes.length; i++) {
-        if (lanes[i].endTime <= checkStart) {
-          assignedLane = i;
-          break;
-        }
-      }
+      // Lanes needed = proportional to resources (e.g. 8 GPUs -> 8 lanes)
+      const lanesNeeded = Math.max(1, Math.ceil(slot.heightFrac * scale));
       
-      // If no lane available, create a new one
-      if (assignedLane === -1) {
-        assignedLane = lanes.length;
-        lanes.push({ endTime: checkEnd, heightFrac: slot.heightFrac });
-      } else {
-        lanes[assignedLane] = { endTime: checkEnd, heightFrac: slot.heightFrac };
+      let j = -1;
+      for (let i = 0; i <= lanes.length - lanesNeeded; i++) {
+        let allFree = true;
+        for (let k = i; k < i + lanesNeeded; k++) {
+          if (lanes[k] && lanes[k].endTime > checkStart) { allFree = false; break; }
+        }
+        if (allFree) { j = i; break; }
       }
+      if (j === -1) {
+        j = lanes.length;
+        for (let k = 0; k < lanesNeeded; k++) lanes.push(null);
+      }
+      for (let k = j; k < j + lanesNeeded; k++) lanes[k] = { endTime: checkEnd, heightFrac: slot.heightFrac };
       
       // #region agent log
       if (slots.length > 1) {
-        fetch('http://localhost:7242/ingest/0169ba02-75f6-4903-bc26-90121609c148',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.js:assignLanes',message:'lane assigned',data:{jobId: slot.job?.job_id, checkStart, checkEnd, assignedLane, lanesLength: lanes.length}, timestamp: Date.now(), sessionId: 'debug-session', hypothesisId: 'C'})}).catch(()=>{});
+        fetch('http://localhost:7242/ingest/0169ba02-75f6-4903-bc26-90121609c148',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.js:assignLanes',message:'lane assigned',data:{jobId: slot.job?.job_id, checkStart, checkEnd, assignedLane: j, lanesNeeded, lanesLength: lanes.length}, timestamp: Date.now(), sessionId: 'debug-session', hypothesisId: 'C'})}).catch(()=>{});
       }
       // #endregion
-      slot.lane = assignedLane;
+      slot.lane = j;
+      slot.laneCount = lanesNeeded;
       slot.laneHeightFrac = slot.heightFrac;
     });
     
-    // Calculate total height needed for all lanes
-    const totalHeightFrac = lanes.reduce((sum, lane) => sum + lane.heightFrac, 0);
-    
-    return { maxLanes: lanes.length, totalHeightFrac: totalHeightFrac || 1 };
+    const totalHeightFrac = lanes.filter(Boolean).reduce((sum, lane) => sum + lane.heightFrac, 0);
+    return { maxLanes: Math.max(1, lanes.length), totalHeightFrac: totalHeightFrac || 1 };
   }
 
   function getDiskSelection(side) {
@@ -619,10 +621,19 @@
       let useCumulativeStacking = isPendingRow;
       let laneInfo = { maxLanes: 1 };
       if (!isPendingRow) {
-        laneInfo = assignLanes(slots);
+        laneInfo = assignLanes(slots, perNode);
       }
-      const numLanes = useCumulativeStacking ? 1 : (laneInfo.maxLanes > 1 ? laneInfo.maxLanes : perNode);
-      const laneHeight = rowHeight / numLanes;
+      const displayLanesPerNode = 8;
+      const numLanes = useCumulativeStacking ? 1 : (laneInfo.maxLanes > 1 ? laneInfo.maxLanes : Math.min(perNode, displayLanesPerNode));
+      // When many lanes, grow row so each lane has minimum height and bar proportion is visible
+      const MIN_LANE_HEIGHT = 8;
+      const effectiveRowHeight = (!isPendingRow && numLanes > 1)
+        ? Math.max(rowHeight, numLanes * MIN_LANE_HEIGHT)
+        : rowHeight;
+      const laneHeight = effectiveRowHeight / numLanes;
+      if (effectiveRowHeight !== rowHeight) {
+        chartEl.style.height = effectiveRowHeight + "px";
+      }
 
       // #region agent log
       if (!isPendingRow && slots.length > 0) {
@@ -631,7 +642,7 @@
       // #endregion
 
       const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-      svg.setAttribute("viewBox", `0 0 ${width} ${rowHeight}`);
+      svg.setAttribute("viewBox", `0 0 ${width} ${effectiveRowHeight}`);
       svg.setAttribute("preserveAspectRatio", "none");
 
       const ticks = getTimeTicks(width);
@@ -640,23 +651,29 @@
         line.setAttribute("x1", x);
         line.setAttribute("y1", 0);
         line.setAttribute("x2", x);
-        line.setAttribute("y2", rowHeight);
+        line.setAttribute("y2", effectiveRowHeight);
         line.setAttribute("class", tickLabel === "now" ? "guideline guideline-now" : "guideline");
         svg.appendChild(line);
       });
+
+      let defs = null;
 
       // For overlapping jobs: cumulative y stacking. For non-overlapping: lane-based positioning.
       let cumulativeY = 0;
       slots.forEach((slot, slotIndex) => {
         const lane = slot.lane || 0;
+        const laneCount = slot.laneCount != null ? slot.laneCount : 1;
         const y = useCumulativeStacking ? cumulativeY : (lane * laneHeight);
         // #region agent log
         if (!isPendingRow && slots.length > 1) {
-          fetch('http://localhost:7242/ingest/0169ba02-75f6-4903-bc26-90121609c148',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.js:slot render',message:'slot y and lane',data:{label, jobId: slot.job?.job_id, slotIndex, lane, y, cumulativeYBefore: cumulativeY, useCumulativeStacking}, timestamp: Date.now(), sessionId: 'debug-session', hypothesisId: 'B'})}).catch(()=>{});
+          fetch('http://localhost:7242/ingest/0169ba02-75f6-4903-bc26-90121609c148',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.js:slot render',message:'slot y and lane',data:{label, jobId: slot.job?.job_id, slotIndex, lane, laneCount, y, cumulativeYBefore: cumulativeY, useCumulativeStacking}, timestamp: Date.now(), sessionId: 'debug-session', hypothesisId: 'B'})}).catch(()=>{});
         }
         // #endregion
-        // Height is based on resource usage relative to TOTAL row
-        const h = Math.max(0, rowHeight * slot.heightFrac);
+        // Height: use actual resource fraction so 1 CPU = 1/224 row, 1 GPU = 1/8 row; cap at assigned lane space so no overlap
+        const hRaw = Math.max(0, (useCumulativeStacking ? rowHeight : effectiveRowHeight) * slot.heightFrac);
+        const h = (numLanes > 1 && !useCumulativeStacking)
+          ? Math.min(laneCount * laneHeight, hRaw)
+          : hRaw;
         const job = slot.job;
         const labelStr = "#" + job.job_id + " · P=" + (job.priority != null ? job.priority : "—") + " · " + job.user + " · " + (job.job_name || job.job_id);
         const prefix = slot.unusual ? UNUSUAL_EMOJI + " " : "";
@@ -686,6 +703,23 @@
           const x1 = timeToX(slot.mainStart, width);
           const x2 = timeToX(slot.mainEnd, width);
           const w = Math.max(1, x2 - x1);
+          if (!defs) {
+            defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+            svg.insertBefore(defs, svg.firstChild);
+          }
+          const clipId = "clip-main-" + slotIndex;
+          const clipPath = document.createElementNS("http://www.w3.org/2000/svg", "clipPath");
+          clipPath.setAttribute("id", clipId);
+          const clipRect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+          clipRect.setAttribute("x", x1);
+          clipRect.setAttribute("y", y);
+          clipRect.setAttribute("width", w);
+          clipRect.setAttribute("height", h);
+          clipPath.appendChild(clipRect);
+          defs.appendChild(clipPath);
+
+          const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+          g.setAttribute("clip-path", "url(#" + clipId + ")");
           const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
           rect.setAttribute("x", x1);
           rect.setAttribute("y", y);
@@ -695,15 +729,15 @@
           rect.setAttribute("data-job-id", job.job_id);
           rect.classList.add("timeline-bar", "job-bar", "main");
           if (slot.unusual) rect.classList.add("unusual");
-          svg.appendChild(rect);
-
+          g.appendChild(rect);
           const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
           text.setAttribute("x", x1 + 4);
           text.setAttribute("y", y + h / 2);
           text.setAttribute("class", "label timeline-bar main");
           if (slot.unusual) text.classList.add("unusual");
           text.textContent = prefix + labelStr;
-          svg.appendChild(text);
+          g.appendChild(text);
+          svg.appendChild(g);
         } else if (slot.waitStart != null && slot.waitEnd != null) {
           const x1 = timeToX(slot.waitStart, width);
           const pendingText = document.createElementNS("http://www.w3.org/2000/svg", "text");
