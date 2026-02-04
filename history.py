@@ -209,22 +209,35 @@ def close_stale_jobs(db_path: str, stale_threshold_ms: int, get_final_info_fn):
     """
     Close jobs where last_seen_ms < stale_threshold_ms and state is RUNNING or PENDING.
     For each, call get_final_info_fn(job_id) -> (state, end_time_ms).
+    If a newer version of the same job_id exists, mark as superseded without calling scontrol.
     """
     with _db_lock:
         conn = sqlite3.connect(db_path)
         try:
             cursor = conn.execute("""
-                SELECT id, job_id, last_seen_ms FROM jobs
+                SELECT id, job_id, last_seen_ms, submit_time_ms FROM jobs
                 WHERE last_seen_ms < ? AND state IN ('RUNNING', 'PENDING')
             """, (stale_threshold_ms,))
             stale_rows = cursor.fetchall()
             
-            for row_id, job_id, last_seen_ms in stale_rows:
-                final_state, final_end_time_ms = get_final_info_fn(job_id)
-                if final_state is None:
-                    final_state = "FINISHED_UNKNOWN"
-                if final_end_time_ms is None:
+            for row_id, job_id, last_seen_ms, submit_time_ms in stale_rows:
+                # Check if a newer version of this job_id exists (requeue/restart)
+                newer = conn.execute("""
+                    SELECT COUNT(*) FROM jobs 
+                    WHERE job_id = ? AND submit_time_ms > ?
+                """, (job_id, submit_time_ms)).fetchone()[0]
+                
+                if newer > 0:
+                    # A newer version exists - this one was requeued/superseded
+                    final_state = "REQUEUED"
                     final_end_time_ms = last_seen_ms
+                else:
+                    # No newer version - get final state from scontrol
+                    final_state, final_end_time_ms = get_final_info_fn(job_id)
+                    if final_state is None:
+                        final_state = "FINISHED_UNKNOWN"
+                    if final_end_time_ms is None:
+                        final_end_time_ms = last_seen_ms
                 
                 conn.execute("""
                     UPDATE jobs SET state = ?, end_time_ms = ?
