@@ -473,11 +473,11 @@
     chartEl.appendChild(svg);
 
     rowEl.querySelector(".disk-customize-btn").addEventListener("click", () => openDiskModal(side));
-    attachDiskChartHover(chartEl, side, width, rowHeight);
+    attachDiskChartHover(chartEl, side, width, rowHeight, rowEl);
     return rowEl;
   }
 
-  function attachDiskChartHover(chartEl, side, width, rowHeight) {
+  function attachDiskChartHover(chartEl, side, width, rowHeight, rowEl) {
     const samples = state.diskSamples || [];
     const selected = getDiskSelection(side);
     if (samples.length === 0) return;
@@ -548,6 +548,12 @@
       highlightLine = null;
       tooltipEl.classList.remove("visible");
       tooltipEl.setAttribute("aria-hidden", "true");
+    });
+    rowEl.addEventListener("mouseleave", () => {
+      tooltipEl.classList.remove("visible");
+      tooltipEl.setAttribute("aria-hidden", "true");
+      if (highlightLine && highlightLine.parentNode) highlightLine.parentNode.removeChild(highlightLine);
+      highlightLine = null;
     });
   }
 
@@ -625,15 +631,9 @@
       }
       const displayLanesPerNode = 8;
       const numLanes = useCumulativeStacking ? 1 : (laneInfo.maxLanes > 1 ? laneInfo.maxLanes : Math.min(perNode, displayLanesPerNode));
-      // When many lanes, grow row so each lane has minimum height and bar proportion is visible
-      const MIN_LANE_HEIGHT = 8;
-      const effectiveRowHeight = (!isPendingRow && numLanes > 1)
-        ? Math.max(rowHeight, numLanes * MIN_LANE_HEIGHT)
-        : rowHeight;
+      // Keep row height fixed so max y stays within row (no growing to numLanes*8 which gave y=336+)
+      const effectiveRowHeight = rowHeight;
       const laneHeight = effectiveRowHeight / numLanes;
-      if (effectiveRowHeight !== rowHeight) {
-        chartEl.style.height = effectiveRowHeight + "px";
-      }
 
       // #region agent log
       if (!isPendingRow && slots.length > 0) {
@@ -671,9 +671,11 @@
         // #endregion
         // Height: use actual resource fraction so 1 CPU = 1/224 row, 1 GPU = 1/8 row; cap at assigned lane space so no overlap
         const hRaw = Math.max(0, (useCumulativeStacking ? rowHeight : effectiveRowHeight) * slot.heightFrac);
-        const h = (numLanes > 1 && !useCumulativeStacking)
+        let h = (numLanes > 1 && !useCumulativeStacking)
           ? Math.min(laneCount * laneHeight, hRaw)
           : hRaw;
+        // Never draw past row bottom (y + h can exceed effectiveRowHeight if lane + laneCount > numLanes in edge cases)
+        h = Math.min(h, Math.max(0, effectiveRowHeight - y));
         const job = slot.job;
         const labelStr = "#" + job.job_id + " · P=" + (job.priority != null ? job.priority : "—") + " · " + job.user + " · " + (job.job_name || job.job_id);
         const prefix = slot.unusual ? UNUSUAL_EMOJI + " " : "";
@@ -703,6 +705,20 @@
           const x1 = timeToX(slot.mainStart, width);
           const x2 = timeToX(slot.mainEnd, width);
           const w = Math.max(1, x2 - x1);
+
+          // Bar (not clipped)
+          const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+          rect.setAttribute("x", x1);
+          rect.setAttribute("y", y);
+          rect.setAttribute("width", w);
+          rect.setAttribute("height", h);
+          rect.setAttribute("fill", slot.color);
+          rect.setAttribute("data-job-id", job.job_id);
+          rect.classList.add("timeline-bar", "job-bar", "main");
+          if (slot.unusual) rect.classList.add("unusual");
+          svg.appendChild(rect);
+
+          // Text (clipped to bar bounds so it doesn't overflow)
           if (!defs) {
             defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
             svg.insertBefore(defs, svg.firstChild);
@@ -718,26 +734,14 @@
           clipPath.appendChild(clipRect);
           defs.appendChild(clipPath);
 
-          const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
-          g.setAttribute("clip-path", "url(#" + clipId + ")");
-          const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-          rect.setAttribute("x", x1);
-          rect.setAttribute("y", y);
-          rect.setAttribute("width", w);
-          rect.setAttribute("height", h);
-          rect.setAttribute("fill", slot.color);
-          rect.setAttribute("data-job-id", job.job_id);
-          rect.classList.add("timeline-bar", "job-bar", "main");
-          if (slot.unusual) rect.classList.add("unusual");
-          g.appendChild(rect);
           const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
           text.setAttribute("x", x1 + 4);
           text.setAttribute("y", y + h / 2);
           text.setAttribute("class", "label timeline-bar main");
+          text.setAttribute("clip-path", "url(#" + clipId + ")");
           if (slot.unusual) text.classList.add("unusual");
           text.textContent = prefix + labelStr;
-          g.appendChild(text);
-          svg.appendChild(g);
+          svg.appendChild(text);
         } else if (slot.waitStart != null && slot.waitEnd != null) {
           const x1 = timeToX(slot.waitStart, width);
           const pendingText = document.createElementNS("http://www.w3.org/2000/svg", "text");
@@ -986,7 +990,8 @@
       el.removeEventListener("mouseout", el._jobBarOut);
       el._jobBarOver = (ev) => {
         const t = ev.target;
-        if (t && t.getAttribute && t.getAttribute("data-job-id")) {
+        // Only trigger on main bars, not wait bars (wait bars highlight along with main bar)
+        if (t && t.getAttribute && t.getAttribute("data-job-id") && t.classList.contains("main")) {
           const jobId = t.getAttribute("data-job-id");
           show(jobId, ev);
           el._hoverJobId = jobId;

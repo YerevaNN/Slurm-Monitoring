@@ -208,6 +208,13 @@ body {
   font-size: 11px;
   pointer-events: none;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  visibility: hidden;
+}
+
+.disk-tooltip.visible {
+  opacity: 1;
+  visibility: visible;
 }
 
 .disk-tooltip .disk-tooltip-line {
@@ -336,6 +343,7 @@ body {
 
 .timeline-bar.wait {
   opacity: 0.5;
+  pointer-events: none;
 }
 
 /* Hide waiting periods for finished jobs by default */
