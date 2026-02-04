@@ -14,7 +14,7 @@
     const all = [...new Set([...nodes, ...fromJobs])].sort();
     return all.concat("Pending");
   }
-  const UNUSUAL_STATES = new Set(["CANCELLED", "CANCELLING", "FAILED", "TIMEOUT", "NODE_FAIL", "BOOT_FAIL", "PREEMPTED", "REVOKED", "SPECIAL_EXIT", "FINISHED_UNKNOWN"]);
+  const UNUSUAL_STATES = new Set(["FAILED", "TIMEOUT", "NODE_FAIL", "BOOT_FAIL", "PREEMPTED", "REVOKED", "SPECIAL_EXIT", "FINISHED_UNKNOWN"]);
   const BAD_NODE_STATES = new Set(["DOWN", "DRAIN", "DRNG", "MAINT", "NOT_RESPONDING"]);
   const UNUSUAL_EMOJI = "⚠️";
   const PALETTE = [
