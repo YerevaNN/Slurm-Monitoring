@@ -613,7 +613,7 @@
       const slots = rows[label] || [];
       const rowHeight = heights[rowIndex] || BASE_ROW_HEIGHT;
       const rowEl = document.createElement("div");
-      rowEl.className = "timeline-row";
+      rowEl.className = "timeline-row" + (label === "Pending" ? " timeline-row-pending" : "");
       rowEl.innerHTML = `<span class="row-label">${label}</span><div class="row-chart"></div>`;
       const chartEl = rowEl.querySelector(".row-chart");
       chartEl.style.height = rowHeight + "px";
@@ -692,6 +692,7 @@
           rect.setAttribute("fill", slot.color);
           rect.setAttribute("data-job-id", job.job_id);
           rect.classList.add("timeline-bar", "job-bar", "wait");
+          if (!isPendingRow) rect.classList.add("wait-node");
           if (slot.unusual) rect.classList.add("unusual");
           // Hide waiting period for finished jobs (show only on hover)
           const finishedStates = ["COMPLETED", "FAILED", "CANCELLED", "TIMEOUT", "COMPLETING", "NODE_FAIL", "PREEMPTED", "OUT_OF_MEMORY"];
@@ -990,8 +991,9 @@
       el.removeEventListener("mouseout", el._jobBarOut);
       el._jobBarOver = (ev) => {
         const t = ev.target;
-        // Only trigger on main bars, not wait bars (wait bars highlight along with main bar)
-        if (t && t.getAttribute && t.getAttribute("data-job-id") && t.classList.contains("main")) {
+        // Main bars always trigger; wait bars only in Pending row (node-row wait bars are pointer-events: none)
+        const isPendingWait = t && t.classList && t.classList.contains("wait") && t.closest && t.closest(".timeline-row-pending");
+        if (t && t.getAttribute && t.getAttribute("data-job-id") && (t.classList.contains("main") || isPendingWait)) {
           const jobId = t.getAttribute("data-job-id");
           show(jobId, ev);
           el._hoverJobId = jobId;

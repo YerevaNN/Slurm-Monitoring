@@ -343,6 +343,10 @@ body {
 
 .timeline-bar.wait {
   opacity: 0.5;
+}
+
+/* Node-row wait bars: hover passes through to main bar; Pending wait bars stay interactive */
+.timeline-bar.wait.wait-node {
   pointer-events: none;
 }
 
