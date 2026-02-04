@@ -171,15 +171,20 @@ def get_latest_meta(db_path: str) -> dict[str, Any]:
 
 
 def get_jobs_in_window(db_path: str, from_ms: int, to_ms: int) -> list[dict[str, Any]]:
-    """Return jobs that overlap the time window [from_ms, to_ms]."""
+    """Return jobs that overlap the time window [from_ms, to_ms]. Returns only the latest version of each job."""
     with _db_lock:
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
         try:
+            # Get only the latest version of each job (highest submit_time for same job_id)
             cursor = conn.execute("""
-                SELECT * FROM jobs
-                WHERE submit_time_ms < ?
-                  AND (end_time_ms IS NULL OR end_time_ms > ?)
+                WITH latest_jobs AS (
+                    SELECT *, ROW_NUMBER() OVER (PARTITION BY job_id ORDER BY submit_time_ms DESC) as rn
+                    FROM jobs
+                    WHERE submit_time_ms < ?
+                      AND (end_time_ms IS NULL OR end_time_ms > ?)
+                )
+                SELECT * FROM latest_jobs WHERE rn = 1
             """, (to_ms, from_ms))
             rows = cursor.fetchall()
             jobs = []
@@ -188,6 +193,7 @@ def get_jobs_in_window(db_path: str, from_ms: int, to_ms: int) -> list[dict[str,
                 job["allocations"] = json.loads(job.pop("allocations_json", "[]"))
                 job.pop("id", None)
                 job.pop("last_seen_ms", None)
+                job.pop("rn", None)  # Remove ROW_NUMBER column
                 # Rename fields to match frontend expectations (remove _ms suffix)
                 job["start_time"] = job.pop("start_time_ms", None)
                 job["end_time"] = job.pop("end_time_ms", None)
