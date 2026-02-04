@@ -9,4 +9,4 @@ DEFAULT_REFRESH = 10
 
 # History settings
 HISTORY_DB_PATH = os.path.join(os.path.dirname(__file__), "data", "slurm_history.db")
-HISTORY_RETENTION_DAYS = 7
+HISTORY_RETENTION_DAYS = None  # None = keep forever (no cleanup)

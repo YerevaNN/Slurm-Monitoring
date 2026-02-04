@@ -249,9 +249,11 @@ def close_stale_jobs(db_path: str, stale_threshold_ms: int, get_final_info_fn):
             conn.close()
 
 
-def cleanup(db_path: str, retention_days: int):
-    """Delete jobs where end_time_ms < (now - retention_days)."""
+def cleanup(db_path: str, retention_days: int | None):
+    """Delete jobs where end_time_ms < (now - retention_days). If retention_days is None or <= 0, skip (keep forever)."""
     import time
+    if retention_days is None or retention_days <= 0:
+        return
     retention_ms = retention_days * 24 * 60 * 60 * 1000
     cutoff = int(time.time() * 1000) - retention_ms
     with _db_lock:
