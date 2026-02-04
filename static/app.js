@@ -21,6 +21,13 @@
     "#d4a574", "#c9956a", "#e0b080", "#b88860", "#dcb090",
     "#c8a070", "#e8c090", "#b08058", "#d8a878", "#c09068",
   ];
+  const DISK_PALETTE = [
+    "#2563eb", "#0d9488", "#059669", "#ca8a04", "#c2410c",
+    "#7c3aed", "#be185d", "#0369a1", "#0f766e", "#b45309",
+  ];
+
+  const DISK_STORAGE_LEFT = "slurm-disk-left";
+  const DISK_STORAGE_RIGHT = "slurm-disk-right";
 
   let state = {
     jobs: [],
@@ -34,6 +41,8 @@
     refreshIntervalMs: 10000,
     refreshTimer: null,
     historyMode: false,
+    diskSamples: [],
+    diskList: [],
   };
 
   function nowMs() {
@@ -360,6 +369,11 @@
         lanes[assignedLane] = { endTime: checkEnd, heightFrac: slot.heightFrac };
       }
       
+      // #region agent log
+      if (slots.length > 1) {
+        fetch('http://localhost:7242/ingest/0169ba02-75f6-4903-bc26-90121609c148',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.js:assignLanes',message:'lane assigned',data:{jobId: slot.job?.job_id, checkStart, checkEnd, assignedLane, lanesLength: lanes.length}, timestamp: Date.now(), sessionId: 'debug-session', hypothesisId: 'C'})}).catch(()=>{});
+      }
+      // #endregion
       slot.lane = assignedLane;
       slot.laneHeightFrac = slot.heightFrac;
     });
@@ -370,10 +384,218 @@
     return { maxLanes: lanes.length, totalHeightFrac: totalHeightFrac || 1 };
   }
 
-  function stackAndRender(rows, containerId, widthHint, rowHeights) {
+  function getDiskSelection(side) {
+    const key = side === "left" ? DISK_STORAGE_LEFT : DISK_STORAGE_RIGHT;
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        const arr = JSON.parse(raw);
+        if (Array.isArray(arr)) return arr;
+      }
+    } catch (e) { /* ignore */ }
+    const list = state.diskList || [];
+    const n = list.length;
+    const half = Math.floor(n / 2);
+    return side === "left" ? list.slice(0, half) : list.slice(half);
+  }
+
+  function setDiskSelection(side, mounts) {
+    const key = side === "left" ? DISK_STORAGE_LEFT : DISK_STORAGE_RIGHT;
+    try {
+      localStorage.setItem(key, JSON.stringify(mounts));
+    } catch (e) { /* ignore */ }
+  }
+
+  function buildDiskRow(containerId, width) {
+    const isLeft = containerId.includes("gpu");
+    const side = isLeft ? "left" : "right";
+    const selected = getDiskSelection(side);
+    const rowHeight = 100;
+    const rowEl = document.createElement("div");
+    rowEl.className = "timeline-row disk-row";
+    rowEl.innerHTML = `<span class="row-label">Disk <button type="button" class="disk-customize-btn" data-side="${side}" aria-label="Customize disks"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button></span><div class="row-chart disk-chart"></div>`;
+    const chartEl = rowEl.querySelector(".row-chart");
+    chartEl.style.height = rowHeight + "px";
+
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", `0 0 ${width} ${rowHeight}`);
+    svg.setAttribute("preserveAspectRatio", "none");
+    svg.setAttribute("data-disk-side", side);
+
+    const now = nowMs();
+    const timeMin = state.timeMin;
+    const timeMax = state.timeMax;
+    const span = timeMax - timeMin || 1;
+
+    const ticks = getTimeTicks(width);
+    ticks.forEach(({ x, label: tickLabel }) => {
+      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      line.setAttribute("x1", x);
+      line.setAttribute("y1", 0);
+      line.setAttribute("x2", x);
+      line.setAttribute("y2", rowHeight);
+      line.setAttribute("class", tickLabel === "now" ? "guideline guideline-now" : "guideline");
+      svg.appendChild(line);
+    });
+
+    const samples = (state.diskSamples || []).filter((s) => s.ts_ms <= now);
+    if (samples.length === 0) {
+      const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      text.setAttribute("x", width / 2);
+      text.setAttribute("y", rowHeight / 2);
+      text.setAttribute("text-anchor", "middle");
+      text.setAttribute("fill", "var(--text-muted)");
+      text.textContent = "No disk data";
+      svg.appendChild(text);
+    } else {
+      selected.forEach((mount, idx) => {
+        const color = DISK_PALETTE[idx % DISK_PALETTE.length];
+        const points = samples.map((s) => {
+          const x = ((s.ts_ms - timeMin) / span) * width;
+          const pct = (s.disks[mount] && s.disks[mount].use_pct != null) ? s.disks[mount].use_pct : 0;
+          const y = rowHeight - (pct / 100) * rowHeight;
+          return `${x},${y}`;
+        }).join(" ");
+        if (points) {
+          const poly = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
+          poly.setAttribute("points", points);
+          poly.setAttribute("fill", "none");
+          poly.setAttribute("stroke", color);
+          poly.setAttribute("stroke-width", "1.5");
+          poly.setAttribute("data-disk-mount", mount);
+          svg.appendChild(poly);
+        }
+      });
+    }
+
+    chartEl.appendChild(svg);
+
+    rowEl.querySelector(".disk-customize-btn").addEventListener("click", () => openDiskModal(side));
+    attachDiskChartHover(chartEl, side, width, rowHeight);
+    return rowEl;
+  }
+
+  function attachDiskChartHover(chartEl, side, width, rowHeight) {
+    const samples = state.diskSamples || [];
+    const selected = getDiskSelection(side);
+    if (samples.length === 0) return;
+    let tooltipEl = document.getElementById("disk-tooltip");
+    if (!tooltipEl) {
+      tooltipEl = document.createElement("div");
+      tooltipEl.id = "disk-tooltip";
+      tooltipEl.className = "disk-tooltip";
+      tooltipEl.setAttribute("aria-hidden", "true");
+      document.body.appendChild(tooltipEl);
+      document.addEventListener("mousemove", function diskTooltipDocMove(ev) {
+        const charts = document.querySelectorAll(".disk-chart");
+        const overAny = Array.from(charts).some((el) => {
+          const r = el.getBoundingClientRect();
+          return ev.clientX >= r.left && ev.clientX <= r.right && ev.clientY >= r.top && ev.clientY <= r.bottom;
+        });
+        if (!overAny) {
+          tooltipEl.classList.remove("visible");
+          tooltipEl.setAttribute("aria-hidden", "true");
+          document.querySelectorAll(".disk-chart .disk-highlight-line").forEach((el) => el.remove());
+        }
+      });
+    }
+    let highlightLine = null;
+
+    chartEl.addEventListener("mousemove", (ev) => {
+      const rect = chartEl.getBoundingClientRect();
+      const x = ev.clientX - rect.left;
+      const t = (x / width) * (state.timeMax - state.timeMin) + state.timeMin;
+      let best = samples[0];
+      let bestD = Math.abs(best.ts_ms - t);
+      samples.forEach((s) => {
+        const d = Math.abs(s.ts_ms - t);
+        if (d < bestD) { bestD = d; best = s; }
+      });
+      if (!highlightLine) {
+        highlightLine = document.createElementNS("http://www.w3.org/2000/svg", "line");
+        highlightLine.setAttribute("class", "disk-highlight-line");
+        highlightLine.setAttribute("stroke", "var(--accent)");
+        highlightLine.setAttribute("stroke-width", "2");
+        highlightLine.setAttribute("y1", 0);
+        highlightLine.setAttribute("y2", rowHeight);
+        chartEl.querySelector("svg").appendChild(highlightLine);
+      }
+      const xPos = ((best.ts_ms - state.timeMin) / (state.timeMax - state.timeMin)) * width;
+      highlightLine.setAttribute("x1", xPos);
+      highlightLine.setAttribute("x2", xPos);
+
+      const items = selected.map((mount, idx) => {
+        const d = best.disks[mount];
+        const color = DISK_PALETTE[idx % DISK_PALETTE.length];
+        const usePct = d && d.use_pct != null ? d.use_pct : -1;
+        if (!d) return { color, text: mount + " —", usePct };
+        const avail = d.avail_gb != null ? d.avail_gb : 0;
+        const total = d.total_gb != null ? d.total_gb : 0;
+        const totalStr = total >= 1000 ? (total / 1000).toFixed(1) + " TB" : total + " GB";
+        return { color, text: mount + " " + avail + " GB free of " + totalStr, usePct };
+      });
+      items.sort((a, b) => b.usePct - a.usePct);
+      tooltipEl.innerHTML = items.map((l) => `<div class="disk-tooltip-line"><span class="disk-tooltip-swatch" style="background-color:${l.color}"></span>${escapeHtml(l.text)}</div>`).join("");
+      tooltipEl.style.left = (ev.clientX + 12) + "px";
+      tooltipEl.style.top = (ev.clientY + 12) + "px";
+      tooltipEl.classList.add("visible");
+      tooltipEl.setAttribute("aria-hidden", "false");
+    });
+    chartEl.addEventListener("mouseleave", () => {
+      if (highlightLine && highlightLine.parentNode) highlightLine.parentNode.removeChild(highlightLine);
+      highlightLine = null;
+      tooltipEl.classList.remove("visible");
+      tooltipEl.setAttribute("aria-hidden", "true");
+    });
+  }
+
+  function openDiskModal(side) {
+    const list = state.diskList || [];
+    const selected = getDiskSelection(side);
+    const title = side === "left" ? "Disks for left chart" : "Disks for right chart";
+    let modal = document.getElementById("disk-modal");
+    if (!modal) {
+      modal = document.createElement("div");
+      modal.id = "disk-modal";
+      modal.className = "disk-modal";
+      modal.setAttribute("role", "dialog");
+      modal.setAttribute("aria-hidden", "true");
+      modal.innerHTML = `<div class="disk-modal-content"><h3 class="disk-modal-title"></h3><div class="disk-modal-list"></div><button type="button" class="disk-modal-apply">Apply</button></div>`;
+      document.body.appendChild(modal);
+      modal.querySelector(".disk-modal-apply").addEventListener("click", () => {
+        const currentSide = modal.getAttribute("data-side");
+        const checkboxes = modal.querySelectorAll('input[name="disk-sel"]:checked');
+        const mounts = Array.from(checkboxes).map((cb) => cb.value);
+        setDiskSelection(currentSide, mounts);
+        modal.classList.remove("visible");
+        modal.setAttribute("aria-hidden", "true");
+        render();
+      });
+    }
+    modal.setAttribute("data-side", side);
+    modal.querySelector(".disk-modal-title").textContent = title;
+    const listEl = modal.querySelector(".disk-modal-list");
+    listEl.textContent = "";
+    list.forEach((mount) => {
+      const label = document.createElement("label");
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.name = "disk-sel";
+      cb.value = mount;
+      if (selected.indexOf(mount) >= 0) cb.checked = true;
+      label.appendChild(cb);
+      label.appendChild(document.createTextNode(" " + mount));
+      listEl.appendChild(label);
+    });
+    modal.classList.add("visible");
+    modal.setAttribute("aria-hidden", "false");
+  }
+
+  function stackAndRender(rows, containerId, widthHint, rowHeights, prependRow) {
     const container = document.getElementById(containerId);
     if (!container) return 0;
     container.textContent = "";
+    if (prependRow) container.appendChild(prependRow);
 
     const width = widthHint || Math.max(400, container.offsetWidth || 400);
     const labels = getRowLabels();
@@ -393,15 +615,20 @@
       const perNode = isGpuSide ? (state.gpusPerNode || GPUS_PER_NODE) : (state.cpusPerNode || CPUS_PER_NODE);
       const isPendingRow = label === "Pending";
       
-      // For node rows, check if there are overlapping jobs (need stacking)
+      // For node rows, use lane-based y (assignLanes reuses lanes when timeline is free). Only Pending uses cumulative stacking.
       let useCumulativeStacking = isPendingRow;
+      let laneInfo = { maxLanes: 1 };
       if (!isPendingRow) {
-        const laneInfo = assignLanes(slots);
-        // If multiple lanes needed, use cumulative stacking to avoid visual overlap
-        useCumulativeStacking = laneInfo.maxLanes > 1;
+        laneInfo = assignLanes(slots);
       }
-      const numLanes = useCumulativeStacking ? 1 : perNode;
+      const numLanes = useCumulativeStacking ? 1 : (laneInfo.maxLanes > 1 ? laneInfo.maxLanes : perNode);
       const laneHeight = rowHeight / numLanes;
+
+      // #region agent log
+      if (!isPendingRow && slots.length > 0) {
+        fetch('http://localhost:7242/ingest/0169ba02-75f6-4903-bc26-90121609c148',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.js:stackAndRender',message:'row lane config',data:{label, maxLanes: laneInfo.maxLanes, useCumulativeStacking, numLanes}, timestamp: Date.now(), sessionId: 'debug-session', hypothesisId: 'A'})}).catch(()=>{});
+      }
+      // #endregion
 
       const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
       svg.setAttribute("viewBox", `0 0 ${width} ${rowHeight}`);
@@ -420,9 +647,14 @@
 
       // For overlapping jobs: cumulative y stacking. For non-overlapping: lane-based positioning.
       let cumulativeY = 0;
-      slots.forEach((slot) => {
+      slots.forEach((slot, slotIndex) => {
         const lane = slot.lane || 0;
         const y = useCumulativeStacking ? cumulativeY : (lane * laneHeight);
+        // #region agent log
+        if (!isPendingRow && slots.length > 1) {
+          fetch('http://localhost:7242/ingest/0169ba02-75f6-4903-bc26-90121609c148',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.js:slot render',message:'slot y and lane',data:{label, jobId: slot.job?.job_id, slotIndex, lane, y, cumulativeYBefore: cumulativeY, useCumulativeStacking}, timestamp: Date.now(), sessionId: 'debug-session', hypothesisId: 'B'})}).catch(()=>{});
+        }
+        // #endregion
         // Height is based on resource usage relative to TOTAL row
         const h = Math.max(0, rowHeight * slot.heightFrac);
         const job = slot.job;
@@ -519,8 +751,10 @@
       (gpuContainer && gpuContainer.offsetWidth) || 0,
       (cpuContainer && cpuContainer.offsetWidth) || 0
     ) || 400;
-    stackAndRender(gpuRows, "gpu-timelines", width, rowHeights);
-    stackAndRender(cpuRows, "cpu-timelines", width, rowHeights);
+    const diskLeftRow = buildDiskRow("gpu-timelines", width);
+    const diskRightRow = buildDiskRow("cpu-timelines", width);
+    stackAndRender(gpuRows, "gpu-timelines", width, rowHeights, diskLeftRow);
+    stackAndRender(cpuRows, "cpu-timelines", width, rowHeights, diskRightRow);
     renderTimeAxis("gpu-timelines", width);
     renderTimeAxis("cpu-timelines", width);
     updateSummaryTitle();
@@ -751,16 +985,20 @@
       state.timeMax = now + half;
     }
     const intervalSec = Math.floor(state.refreshIntervalMs / 1000);
-    const url = "/api/jobs?from=" + Math.floor(state.timeMin) + "&to=" + Math.floor(state.timeMax) + "&interval=" + intervalSec;
-    fetch(url)
-      .then((r) => r.json())
-      .then((data) => {
+    const from = Math.floor(state.timeMin);
+    const to = Math.floor(state.timeMax);
+    const jobsUrl = "/api/jobs?from=" + from + "&to=" + to + "&interval=" + intervalSec;
+    const diskUrl = "/api/disk?from=" + from + "&to=" + to;
+    Promise.all([fetch(jobsUrl).then((r) => r.json()), fetch(diskUrl).then((r) => r.json())])
+      .then(([data, diskData]) => {
         state.jobs = data.jobs || [];
         state.nodes = data.nodes || [];
         state.node_states = data.node_states || {};
         state.node_reasons = data.node_reasons || {};
         state.gpusPerNode = data.gpus_per_node || GPUS_PER_NODE;
         state.cpusPerNode = data.cpus_per_node || CPUS_PER_NODE;
+        state.diskSamples = diskData.samples || [];
+        state.diskList = diskData.disks || [];
         render();
         document.getElementById("last-updated").textContent = "Updated " + new Date().toLocaleTimeString();
       })

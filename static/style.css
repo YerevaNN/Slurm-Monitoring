@@ -186,6 +186,118 @@ body {
   overflow: hidden;
 }
 
+.timeline-row.disk-row .row-chart {
+  height: 100px;
+}
+
+.timeline-row.disk-row .row-label {
+  flex: 0 0 52px;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.disk-tooltip {
+  position: fixed;
+  z-index: 100;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  font-size: 11px;
+  pointer-events: none;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.disk-tooltip .disk-tooltip-line {
+  white-space: nowrap;
+  margin-bottom: 0.15rem;
+}
+
+.disk-tooltip .disk-tooltip-line:last-child {
+  margin-bottom: 0;
+}
+
+.disk-tooltip-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 0.4rem;
+  border-radius: 2px;
+  vertical-align: middle;
+}
+
+.disk-customize-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.2rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.disk-customize-btn:hover {
+  background: var(--border);
+}
+
+.disk-modal {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0, 0, 0, 0.5);
+  align-items: center;
+  justify-content: center;
+}
+
+.disk-modal.visible {
+  display: flex;
+}
+
+.disk-modal-content {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  max-width: 90vw;
+  max-height: 80vh;
+  overflow: auto;
+}
+
+.disk-modal-title {
+  margin: 0 0 0.75rem 0;
+  font-size: 1rem;
+}
+
+.disk-modal-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 1rem;
+}
+
+.disk-modal-list label {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.disk-modal-apply {
+  font: inherit;
+  padding: 0.4rem 0.75rem;
+  background: var(--accent);
+  border: none;
+  color: #fff;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
 .node-status-overlay {
   position: absolute;
   inset: 0;

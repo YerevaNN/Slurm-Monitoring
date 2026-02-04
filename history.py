@@ -56,6 +56,13 @@ def init_db(path: str):
                 updated_at_ms INTEGER
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS disk_samples (
+                timestamp_ms INTEGER NOT NULL,
+                samples_json TEXT NOT NULL
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_disk_timestamp ON disk_samples(timestamp_ms)")
         conn.commit()
         conn.close()
 
@@ -260,6 +267,64 @@ def cleanup(db_path: str, retention_days: int | None):
         conn = sqlite3.connect(db_path)
         try:
             conn.execute("DELETE FROM jobs WHERE end_time_ms < ?", (cutoff,))
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def insert_disk_sample(db_path: str, samples: list[dict[str, Any]], timestamp_ms: int):
+    """Insert one disk sample (all disks at one timestamp)."""
+    with _db_lock:
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute(
+                "INSERT INTO disk_samples (timestamp_ms, samples_json) VALUES (?, ?)",
+                (timestamp_ms, json.dumps(samples))
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def get_disk_samples_in_window(db_path: str, from_ms: int, to_ms: int) -> list[dict[str, Any]]:
+    """Return disk samples in [from_ms, to_ms]. Each item: { ts_ms, disks: { mount: { use_pct, used_gb, total_gb, avail_gb } } }."""
+    with _db_lock:
+        conn = sqlite3.connect(db_path)
+        try:
+            cursor = conn.execute(
+                "SELECT timestamp_ms, samples_json FROM disk_samples WHERE timestamp_ms >= ? AND timestamp_ms <= ? ORDER BY timestamp_ms",
+                (from_ms, to_ms)
+            )
+            rows = cursor.fetchall()
+            result = []
+            for ts_ms, samples_json in rows:
+                samples = json.loads(samples_json)
+                disks = {}
+                for s in samples:
+                    mount = s.get("mount", "")
+                    disks[mount] = {
+                        "use_pct": s.get("use_pct", 0),
+                        "used_gb": s.get("used_gb", 0),
+                        "total_gb": s.get("total_gb", 0),
+                        "avail_gb": s.get("avail_gb", 0),
+                    }
+                result.append({"ts_ms": ts_ms, "disks": disks})
+            return result
+        finally:
+            conn.close()
+
+
+def cleanup_disk_samples(db_path: str, retention_days: int):
+    """Delete disk_samples older than retention_days."""
+    import time
+    if retention_days <= 0:
+        return
+    retention_ms = retention_days * 24 * 60 * 60 * 1000
+    cutoff = int(time.time() * 1000) - retention_ms
+    with _db_lock:
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("DELETE FROM disk_samples WHERE timestamp_ms < ?", (cutoff,))
             conn.commit()
         finally:
             conn.close()

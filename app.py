@@ -7,6 +7,7 @@ from flask import Flask, jsonify, request, send_from_directory
 
 import config
 import history
+from disk import fetch_disk_usage
 from slurm import fetch_jobs, fetch_node_capacities, fetch_node_states, fetch_nodes, get_job_final_info, update_job_settings
 
 app = Flask(__name__, static_folder="static", static_url_path="")
@@ -78,6 +79,21 @@ def api_job_settings(job_id):
     return jsonify({"ok": True})
 
 
+@app.route("/api/disk")
+def api_disk():
+    """Get disk samples in time window. Query params: from (ms), to (ms)."""
+    from_ms = request.args.get("from", type=int)
+    to_ms = request.args.get("to", type=int)
+    if from_ms is None or to_ms is None:
+        return jsonify({"error": "Missing from/to parameters"}), 400
+    samples = history.get_disk_samples_in_window(config.HISTORY_DB_PATH, from_ms, to_ms)
+    disks_set = set()
+    for s in samples:
+        disks_set.update(s.get("disks", {}).keys())
+    disks = sorted(disks_set)
+    return jsonify({"disks": disks, "samples": samples})
+
+
 def get_recorder_interval() -> int:
     """Get current recorder interval in seconds."""
     with _recorder_interval_lock:
@@ -125,6 +141,10 @@ def run_recorder_cycle():
         history.close_stale_jobs(config.HISTORY_DB_PATH, stale_threshold, get_job_final_info)
         
         history.cleanup(config.HISTORY_DB_PATH, config.HISTORY_RETENTION_DAYS)
+        disk_samples = fetch_disk_usage(config.DISK_MIN_SIZE_GB)
+        if disk_samples:
+            history.insert_disk_sample(config.HISTORY_DB_PATH, disk_samples, now_ms)
+        history.cleanup_disk_samples(config.HISTORY_DB_PATH, config.DISK_RETENTION_DAYS)
     except Exception as e:
         print(f"Recorder error: {e}")
         import traceback
