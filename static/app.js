@@ -656,8 +656,6 @@
         svg.appendChild(line);
       });
 
-      let defs = null;
-
       // For overlapping jobs: cumulative y stacking. For non-overlapping: lane-based positioning.
       let cumulativeY = 0;
       slots.forEach((slot, slotIndex) => {
@@ -706,8 +704,6 @@
           const x1 = timeToX(slot.mainStart, width);
           const x2 = timeToX(slot.mainEnd, width);
           const w = Math.max(1, x2 - x1);
-
-          // Bar (not clipped)
           const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
           rect.setAttribute("x", x1);
           rect.setAttribute("y", y);
@@ -719,27 +715,10 @@
           if (slot.unusual) rect.classList.add("unusual");
           svg.appendChild(rect);
 
-          // Text (clipped to bar bounds so it doesn't overflow)
-          if (!defs) {
-            defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
-            svg.insertBefore(defs, svg.firstChild);
-          }
-          const clipId = "clip-main-" + slotIndex;
-          const clipPath = document.createElementNS("http://www.w3.org/2000/svg", "clipPath");
-          clipPath.setAttribute("id", clipId);
-          const clipRect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-          clipRect.setAttribute("x", x1);
-          clipRect.setAttribute("y", y);
-          clipRect.setAttribute("width", w);
-          clipRect.setAttribute("height", h);
-          clipPath.appendChild(clipRect);
-          defs.appendChild(clipPath);
-
           const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
           text.setAttribute("x", x1 + 4);
           text.setAttribute("y", y + h / 2);
           text.setAttribute("class", "label timeline-bar main");
-          text.setAttribute("clip-path", "url(#" + clipId + ")");
           if (slot.unusual) text.classList.add("unusual");
           text.textContent = prefix + labelStr;
           svg.appendChild(text);
