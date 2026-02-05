@@ -784,7 +784,7 @@
     const totalNodes = Math.max((state.nodes || []).length, 1);
     const totalGpus = totalNodes * (state.gpusPerNode || GPUS_PER_NODE);
     const totalCpus = totalNodes * (state.cpusPerNode || CPUS_PER_NODE);
-    const goodStates = new Set(["IDLE", "ALLOC", "MIX", "RESV", "COMP"]);
+    const goodStates = new Set(["IDLE", "ALLOC", "ALLOCATED", "MIX", "RESV", "COMP"]);
     let nodesUp = 0;
     (state.nodes || []).forEach((n) => {
       const s = (state.node_states && state.node_states[n]) ? String(state.node_states[n]).toUpperCase() : "IDLE";
