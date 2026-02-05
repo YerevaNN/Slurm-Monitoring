@@ -784,11 +784,13 @@
     const totalNodes = Math.max((state.nodes || []).length, 1);
     const totalGpus = totalNodes * (state.gpusPerNode || GPUS_PER_NODE);
     const totalCpus = totalNodes * (state.cpusPerNode || CPUS_PER_NODE);
-    const goodStates = new Set(["IDLE", "ALLOC", "ALLOCATED", "MIX", "RESV", "COMP"]);
+    // Up = IDLE, ALLOC*, MIX*, RESV*, COMP* (exact or with suffix e.g. MIX-, ALLOCATED)
+    const goodPrefixes = ["IDLE", "ALLOC", "MIX", "RESV", "COMP"];
     let nodesUp = 0;
     (state.nodes || []).forEach((n) => {
-      const s = (state.node_states && state.node_states[n]) ? String(state.node_states[n]).toUpperCase() : "IDLE";
-      if (goodStates.has(s)) nodesUp++;
+      const s = (state.node_states && state.node_states[n]) ? String(state.node_states[n]).toUpperCase().trim() : "IDLE";
+      const isUp = goodPrefixes.some((p) => s === p || s.startsWith(p + "-") || s.startsWith(p + "+") || s.startsWith(p));
+      if (isUp) nodesUp++;
     });
     if (!state.nodes || state.nodes.length === 0) nodesUp = (state.nodes || []).length;
 
