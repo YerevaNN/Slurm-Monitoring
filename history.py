@@ -1,6 +1,7 @@
 """SQLite-based history storage for Slurm jobs and cluster metadata."""
 import colorsys as _colorsys
 import json
+import re
 import sqlite3
 import threading
 from typing import Any
@@ -69,6 +70,14 @@ def init_db(path: str):
             )
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_disk_timestamp ON disk_samples(timestamp_ms)")
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS capacity_history (
+                timestamp_ms INTEGER PRIMARY KEY,
+                node_capacities_json TEXT NOT NULL,
+                node_status_json TEXT NOT NULL,
+                source TEXT NOT NULL
+            )
+        """)
         # Migrations for existing databases
         existing = {row[1] for row in conn.execute("PRAGMA table_info(jobs)")}
         if "pending_reason" not in existing:
@@ -118,6 +127,16 @@ def init_db(path: str):
             )
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_job_project_rules_user ON job_project_rules(user)")
+        # A singleton proves capacity only at its timestamp, never before it.
+        if not conn.execute("SELECT 1 FROM capacity_history LIMIT 1").fetchone():
+            previous = conn.execute("SELECT updated_at_ms, node_capacities_json, "
+                                    "node_states_json, node_reasons_json FROM meta WHERE id=1").fetchone()
+            if previous and previous[0] is not None and previous[1]:
+                capacities = json.loads(previous[1])
+                if capacities:
+                    _record_capacity(conn, previous[0], capacities,
+                                     json.loads(previous[2] or '{}'),
+                                     json.loads(previous[3] or '{}'), 'legacy_metadata')
         conn.commit()
         conn.close()
 
@@ -206,9 +225,122 @@ def update_meta(db_path: str, nodes: list[str], node_states: dict[str, str],
                 gpus_per_node, cpus_per_node, json.dumps(node_capacities or {}),
                 json.dumps(partitions or {}), ts_ms
             ))
+            if nodes and node_capacities and all(n in node_capacities for n in nodes):
+                _record_capacity(conn, ts_ms, {n: node_capacities[n] for n in nodes},
+                                 node_states, node_reasons, 'recorder')
             conn.commit()
         finally:
             conn.close()
+
+
+def _capacity_status(capacities, states, reasons):
+    """Keep drain/down transitions separate from installed GPU/CPU counts."""
+    result = {}
+    for node in capacities:
+        state = states.get(node, '').upper()
+        if re.search(r'DRAIN|DRNG|DRND', state):
+            kind = 'drained'
+        elif re.search(r'DOWN|FAIL|MAINT|NO_RESPOND|POWERED_DOWN', state) or '*' in state:
+            kind = 'down'
+        else:
+            continue
+        result[node] = {'kind': kind, 'state': state, 'reason': reasons.get(node, '')}
+    return result
+
+
+def _record_capacity(conn, ts_ms, capacities, states, reasons, source, force=False):
+    if not isinstance(ts_ms, int) or ts_ms < 0 or not isinstance(capacities, dict):
+        raise ValueError('Invalid capacity snapshot')
+    normalized = {}
+    for node, capacity in sorted(capacities.items()):
+        values = {key: capacity[key] for key in ('gpus', 'cpus')}
+        if any(type(v) is not int or v < 0 for v in values.values()):
+            raise ValueError('Capacity counts must be nonnegative integers')
+        normalized[node] = values
+    encoded = json.dumps(normalized, sort_keys=True)
+    status = json.dumps(_capacity_status(normalized, states, reasons), sort_keys=True)
+    existing = conn.execute('SELECT node_capacities_json, node_status_json FROM capacity_history '
+                            'WHERE timestamp_ms=?', (ts_ms,)).fetchone()
+    if existing:
+        if tuple(existing) != (encoded, status):
+            raise ValueError('Conflicting capacity snapshot at this timestamp')
+        return
+    previous = conn.execute('SELECT node_capacities_json, node_status_json FROM capacity_history '
+                            'WHERE timestamp_ms<=? ORDER BY timestamp_ms DESC LIMIT 1', (ts_ms,)).fetchone()
+    if not force and previous and tuple(previous) == (encoded, status):
+        return
+    conn.execute('INSERT INTO capacity_history VALUES (?, ?, ?, ?)',
+                 (ts_ms, encoded, status, source))
+
+
+def import_capacity_history(db_path: str, snapshots: list[dict]):
+    """Import explicitly evidenced history atomically; never infer it from jobs."""
+    with _db_lock:
+        conn = sqlite3.connect(db_path)
+        try:
+            for item in sorted(snapshots, key=lambda x: x['timestamp_ms']):
+                _record_capacity(conn, item['timestamp_ms'], item['node_capacities'],
+                                 item.get('node_states', {}), item.get('node_reasons', {}),
+                                 item['source'], force=True)
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def _capacity_window(conn, from_ms, to_ms, buckets, bucket_size_ms):
+    rows = conn.execute('''
+        SELECT timestamp_ms, node_capacities_json, node_status_json, source
+        FROM capacity_history WHERE timestamp_ms < ? AND
+        (timestamp_ms >= ? OR timestamp_ms =
+          (SELECT MAX(timestamp_ms) FROM capacity_history WHERE timestamp_ms <= ?))
+        ORDER BY timestamp_ms
+    ''', (to_ms, from_ms, from_ms)).fetchall()
+    fields = ('gpus', 'cpus', 'drained_gpus', 'drained_cpus', 'down_gpus', 'down_cpus')
+    points = []
+    for timestamp, encoded, status_json, source in rows:
+        capacities, statuses = json.loads(encoded), json.loads(status_json)
+        point = dict(timestamp_ms=max(from_ms, timestamp), source=source)
+        for resource in ('gpus', 'cpus'):
+            point[resource] = sum(c[resource] for c in capacities.values())
+            for kind in ('drained', 'down'):
+                point[f'{kind}_{resource}'] = sum(
+                    capacities[n][resource] for n, s in statuses.items()
+                    if n in capacities and s['kind'] == kind)
+        point['node_status'] = statuses
+        points.append(point)
+    if not points or points[0]['timestamp_ms'] > from_ms:
+        points.insert(0, dict(timestamp_ms=from_ms, **{key: None for key in fields},
+                              node_status={}, source='unknown'))
+    # Explicit end point makes the step line cover the entire observed window.
+    if to_ms > from_ms:
+        points.append({**points[-1], 'timestamp_ms': to_ms})
+    durations = [max(0, min(b + bucket_size_ms, to_ms) - b) for b in buckets]
+    integrals = {key: [0.0] * len(buckets) for key in fields}
+    known_ms = [0] * len(buckets)
+    for first, last in zip(points, points[1:]):
+        if first['gpus'] is None or last['timestamp_ms'] <= first['timestamp_ms']:
+            continue
+        start, end = first['timestamp_ms'], last['timestamp_ms']
+        lo = max(0, (start - from_ms) // bucket_size_ms)
+        hi = min(len(buckets) - 1, (end - 1 - from_ms) // bucket_size_ms)
+        for i in range(lo, hi + 1):
+            overlap = max(0, min(end, buckets[i] + durations[i]) - max(start, buckets[i]))
+            known_ms[i] += overlap
+            for key in fields:
+                integrals[key][i] += overlap * first[key]
+    return {
+        'capacity_points': points,
+        'capacity_buckets': {
+            key: [value / duration if duration and known_ms[i] == duration else None
+                  for i, (value, duration) in enumerate(zip(values, durations))]
+            for key, values in integrals.items()
+        },
+        'installed_gpu_hours': sum(integrals['gpus']) / 3_600_000,
+        'installed_cpu_hours': sum(integrals['cpus']) / 3_600_000,
+        'capacity_coverage_complete': to_ms > from_ms and sum(known_ms) == to_ms - from_ms,
+        'capacity_known_from_ms': next((p['timestamp_ms'] for p in points if p['gpus'] is not None), None),
+        'bucket_durations_ms': durations,
+    }
 
 
 def get_latest_meta(db_path: str) -> dict[str, Any]:
@@ -897,6 +1029,8 @@ def get_usage_buckets(db_path: str, from_ms: int, to_ms: int, group_by: str = 'u
     """
     import time as _time
 
+    now_ms = int(_time.time() * 1000)
+    to_ms = min(to_ms, now_ms)
     range_ms = to_ms - from_ms
     H = 3_600_000
     D = 86_400_000
@@ -934,6 +1068,7 @@ def get_usage_buckets(db_path: str, from_ms: int, to_ms: int, group_by: str = 'u
             ).fetchone()
             proj_map, unit_counts = ({}, {}) if group_by == 'user' else _fetch_proj_map(conn, from_ms, to_ms)
             rule_map = {} if group_by == 'user' else _fetch_job_rule_map(conn)
+            capacity = _capacity_window(conn, from_ms, to_ms, buckets, bucket_size_ms)
         finally:
             conn.close()
 
@@ -948,7 +1083,6 @@ def get_usage_buckets(db_path: str, from_ms: int, to_ms: int, group_by: str = 'u
     if total_cpus <= 0:
         total_cpus = node_count * cpus_per_node
 
-    now_ms = int(_time.time() * 1000)
     users_gpu: dict[str, list[float]] = {}
     users_cpu: dict[str, list[float]] = {}
     colors: dict[str, str] = {}
@@ -957,7 +1091,7 @@ def get_usage_buckets(db_path: str, from_ms: int, to_ms: int, group_by: str = 'u
         user = row["user"] or "unknown"
         job_name = row["job_name"] or ""
         start = row["start_time_ms"]
-        end = row["end_time_ms"] if row["end_time_ms"] else now_ms
+        end = min(row["end_time_ms"] or now_ms, to_ms, now_ms)
         req_gpus = row["req_gpus"] or 0
         req_cpus = row["req_cpus"] or 0
 
@@ -965,7 +1099,8 @@ def get_usage_buckets(db_path: str, from_ms: int, to_ms: int, group_by: str = 'u
         last = min(n - 1, (end - from_ms - 1) // bucket_size_ms)
         for i in range(int(first), int(last) + 1):
             b_start = from_ms + i * bucket_size_ms
-            b_end = b_start + bucket_size_ms
+            duration = capacity['bucket_durations_ms'][i]
+            b_end = b_start + duration
             seg_start = max(start, b_start)
             seg_end = min(end, b_end)
             if seg_end <= seg_start:
@@ -974,13 +1109,13 @@ def get_usage_buckets(db_path: str, from_ms: int, to_ms: int, group_by: str = 'u
                 if user not in users_gpu:
                     users_gpu[user] = [0.0] * n
                     users_cpu[user] = [0.0] * n
-                frac = (seg_end - seg_start) / bucket_size_ms
+                frac = (seg_end - seg_start) / duration
                 users_gpu[user][i] += frac * req_gpus
                 users_cpu[user][i] += frac * req_cpus
             else:
                 _accumulate_grouped_usage(
                     users_gpu, users_cpu, colors, n, i,
-                    seg_start, seg_end, user, req_gpus, req_cpus, bucket_size_ms,
+                    seg_start, seg_end, user, req_gpus, req_cpus, duration,
                     proj_map, group_by, unit_counts, job_name, rule_map,
                 )
 
@@ -997,6 +1132,9 @@ def get_usage_buckets(db_path: str, from_ms: int, to_ms: int, group_by: str = 'u
         "node_capacities": node_capacities,
         "total_gpus": total_gpus,
         "total_cpus": total_cpus,
+        "from_ms": from_ms,
+        "to_ms": to_ms,
+        **capacity,
     }
 
 

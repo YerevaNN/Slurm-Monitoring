@@ -12,6 +12,7 @@ All timestamps in the database use Unix epoch milliseconds. JSON-shaped values a
 
 - `jobs`: one row per Slurm job identity, keyed by unique index `(job_id, submit_time_ms)`. Stores user, job name, state, submit/start/end times, requested GPU/CPU/memory, time limit, priority, array task count, `allocations_json`, and `last_seen_ms`. Running jobs usually have `end_time_ms = NULL`; pending jobs should not use Slurm estimated start times as real `start_time_ms`.
 - `meta`: singleton row with `id = 1`. Stores node list, node states, node drain reasons, discovered GPUs/CPUs per node, and update timestamp.
+- `capacity_history`: change-only snapshots of installed per-node GPU/CPU counts, separate drain/down states/reasons, epoch-ms timestamps and evidence source. Never infer old installed capacity from current metadata or job occupancy. `update_meta()` records changes; `import_capacity_history()` accepts reviewed backfills. Keep this history when cleaning jobs or disk samples.
 - `disk_samples`: one row per recorder poll with `timestamp_ms` and `samples_json`, a JSON list of filesystem usage samples.
 - `research_units`: editable grouping records with unique `title` and display `color`.
 - `projects`: project records with optional `unit_id` and `sort_order`.

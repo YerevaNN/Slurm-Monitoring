@@ -6,7 +6,7 @@
   <base href="./" />
   <title>Slurm – Usage History</title>
   <link rel="stylesheet" href="style.css" />
-  <link rel="stylesheet" href="usage.css" />
+  <link rel="stylesheet" href="usage.css?v=capacity-history-1" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/luxon@3/build/global/luxon.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1/dist/chartjs-adapter-luxon.umd.min.js"></script>
@@ -52,6 +52,14 @@
 
   <div class="usage-layout">
     <main class="usage-main">
+      <div class="capacity-context">
+        <div class="capacity-legend">
+          <span><i class="capacity-key installed-key"></i>Installed capacity</span>
+          <span><i class="capacity-key drained-key"></i>Draining / drained</span>
+          <span><i class="capacity-key down-key"></i>Down / unavailable</span>
+        </div>
+        <div id="capacity-note" role="status"></div>
+      </div>
       <!-- GPU section -->
       <div class="hero-block">
         <div class="hero-left">
@@ -165,6 +173,6 @@
   <!-- Datalist for user autocomplete in assignment forms -->
   <datalist id="known-users-list"></datalist>
 
-  <script src="usage.js"></script>
+  <script src="usage.js?v=capacity-history-1"></script>
 </body>
 </html>

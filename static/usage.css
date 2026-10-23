@@ -6,6 +6,13 @@ body.usage-page {
   overflow: hidden;
 }
 
+.capacity-context { color: var(--text-muted); font-size: 11px; line-height: 1.6; }
+.capacity-legend { display: flex; gap: 1.25rem; flex-wrap: wrap; margin-bottom: 0.3rem; }
+.capacity-legend span { display: inline-flex; align-items: center; gap: 0.4rem; }
+.capacity-key { display: inline-block; width: 22px; border-top: 2px solid #e4e4e7; }
+.drained-key { border-color: #fbbf24; border-top-style: dashed; }
+.down-key { border-color: #f87171; border-top-style: dashed; }
+
 /* ── Controls bar ─────────────────────────────────────────── */
 .usage-controls {
   display: flex;

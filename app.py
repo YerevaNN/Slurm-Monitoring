@@ -361,6 +361,10 @@ def run_recorder_cycle():
         node_capacities = fetch_node_capacities()
         partitions = fetch_partitions()
 
+        # A failed/partial discovery must not manufacture a capacity or drain change.
+        if not nodes or any(n not in node_capacities or n not in node_states for n in nodes):
+            raise RuntimeError('Incomplete node discovery; preserving previous capacity snapshot')
+
         gpus_per_node = max(
             (capacity.get("gpus", 0) for capacity in node_capacities.values()),
             default=0,

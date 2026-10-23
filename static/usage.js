@@ -166,7 +166,44 @@ function buildDatasets(userMap) {
     });
 }
 
-function makeChartOptions(yMax) {
+function buildCapacityDatasets(resource) {
+  const points = state.data.capacity_points || [];
+  return [
+    [resource, 'Installed capacity', '#e4e4e7', []],
+    [`drained_${resource}`, 'Draining / drained (included in installed)', '#fbbf24', [6, 4]],
+    [`down_${resource}`, 'Down / unavailable (included in installed)', '#f87171', [3, 4]],
+  ].filter(([key], i) => i === 0 || points.some(p => p[key] > 0))
+    .map(([key, label, color, dash]) => ({
+      label, data: points.map(p => ({ x: p.timestamp_ms, y: p[key] })),
+      isCapacity: true, fill: false, borderColor: color, borderDash: dash,
+      // Chart.js "before" holds the previous value until the next timestamp.
+      borderWidth: 2, pointRadius: 0, stepped: 'before', spanGaps: false,
+      stack: key, order: -10,
+    }));
+}
+
+function resourceHours(values, data = state.data) {
+  return (values || []).reduce((sum, value, i) =>
+    sum + value * (data.bucket_durations_ms?.[i] ?? data.bucket_size_ms) / 3_600_000, 0);
+}
+
+function installedHours(resource) {
+  if (!state.data.capacity_coverage_complete) return null;
+  return state.data[resource === 'gpus' ? 'installed_gpu_hours' : 'installed_cpu_hours'];
+}
+
+function allocationPercent(hours, available) {
+  return available == null ? null : (available > 0 ? hours / available * 100 : 0);
+}
+
+function chartMaximum(resource, userMap) {
+  const points = (state.data.capacity_points || []).map(p => p[resource] || 0);
+  const allocations = state.data.buckets.map((_, i) =>
+    Object.values(userMap).reduce((sum, values) => sum + (values[i] || 0), 0));
+  return Math.max(1, ...points, ...allocations);
+}
+
+function makeChartOptions(yMax, resource) {
   const gridColor = '#2a2a30';
   const tickColor = '#71717a';
   const fontOpts = { family: '"JetBrains Mono","Fira Code",ui-monospace,monospace', size: 11 };
@@ -174,7 +211,7 @@ function makeChartOptions(yMax) {
     responsive: true,
     maintainAspectRatio: false,
     animation: false,
-    interaction: { mode: 'index', intersect: false },
+    interaction: { mode: 'nearest', axis: 'x', intersect: false },
     plugins: {
       legend: { display: false },
       tooltip: {
@@ -190,8 +227,13 @@ function makeChartOptions(yMax) {
             return ` ${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)}`;
           },
           footer(items) {
-            const total = items.reduce((s, i) => s + i.parsed.y, 0);
-            return `Total: ${total.toFixed(1)}`;
+            const allocations = items.filter(i => !i.dataset.isCapacity);
+            if (!allocations.length) return '';
+            const total = allocations.reduce((s, i) => s + i.parsed.y, 0);
+            const available = state.data.capacity_buckets?.[resource]?.[allocations[0].dataIndex];
+            return available > 0
+              ? `Allocated: ${total.toFixed(1)} / ${available.toFixed(1)} (${(100 * total / available).toFixed(1)}%)`
+              : `Allocated: ${total.toFixed(1)}; capacity unknown`;
           },
         },
       },
@@ -216,11 +258,11 @@ function makeChartOptions(yMax) {
 
 function renderCharts() {
   const { data } = state;
-  const gpuMax = data.total_gpus || data.node_count * data.gpus_per_node;
-  const cpuMax = data.total_cpus || data.node_count * data.cpus_per_node;
+  const gpuMax = chartMaximum('gpus', data.users);
+  const cpuMax = chartMaximum('cpus', data.cpu_users);
 
-  const gpuDatasets = buildDatasets(data.users);
-  const cpuDatasets = buildDatasets(data.cpu_users);
+  const gpuDatasets = [...buildDatasets(data.users), ...buildCapacityDatasets('gpus')];
+  const cpuDatasets = [...buildDatasets(data.cpu_users), ...buildCapacityDatasets('cpus')];
 
   if (state.gpuChart) {
     state.gpuChart.data.datasets = gpuDatasets;
@@ -230,7 +272,7 @@ function renderCharts() {
   } else {
     state.gpuChart = new Chart(
       document.getElementById('gpu-chart'),
-      { type: 'line', data: { datasets: gpuDatasets }, options: makeChartOptions(gpuMax) }
+      { type: 'line', data: { datasets: gpuDatasets }, options: makeChartOptions(gpuMax, 'gpus') }
     );
   }
 
@@ -242,18 +284,18 @@ function renderCharts() {
   } else {
     state.cpuChart = new Chart(
       document.getElementById('cpu-chart'),
-      { type: 'line', data: { datasets: cpuDatasets }, options: makeChartOptions(cpuMax) }
+      { type: 'line', data: { datasets: cpuDatasets }, options: makeChartOptions(cpuMax, 'cpus') }
     );
   }
 }
 
 function updateChartsVisibility() {
   if (state.gpuChart) {
-    state.gpuChart.data.datasets = buildDatasets(state.data.users);
+    state.gpuChart.data.datasets = [...buildDatasets(state.data.users), ...buildCapacityDatasets('gpus')];
     state.gpuChart.update('none');
   }
   if (state.cpuChart) {
-    state.cpuChart.data.datasets = buildDatasets(state.data.cpu_users);
+    state.cpuChart.data.datasets = [...buildDatasets(state.data.cpu_users), ...buildCapacityDatasets('cpus')];
     state.cpuChart.update('none');
   }
   if (state.waitChart) {
@@ -271,27 +313,32 @@ function updateChartsVisibility() {
 
 function renderMetrics() {
   const { data, visibleUsers } = state;
-  const bucketHours = data.bucket_size_ms / 3_600_000;
-
-  const totalAvailGPU = (data.total_gpus || data.node_count * data.gpus_per_node) * data.buckets.length * bucketHours;
+  const totalAvailGPU = installedHours('gpus');
   const usedGPU = [...visibleUsers].reduce((s, u) => {
-    return s + (data.users[u] || []).reduce((a, v) => a + v, 0) * bucketHours;
+    return s + resourceHours(data.users[u]);
   }, 0);
-  const gpuPct = totalAvailGPU > 0 ? (usedGPU / totalAvailGPU * 100) : 0;
+  const gpuPct = allocationPercent(usedGPU, totalAvailGPU);
 
-  const totalAvailCPU = (data.total_cpus || data.node_count * data.cpus_per_node) * data.buckets.length * bucketHours;
+  const totalAvailCPU = installedHours('cpus');
   const usedCPU = [...visibleUsers].reduce((s, u) => {
-    return s + (data.cpu_users[u] || []).reduce((a, v) => a + v, 0) * bucketHours;
+    return s + resourceHours(data.cpu_users[u]);
   }, 0);
-  const cpuPct = totalAvailCPU > 0 ? (usedCPU / totalAvailCPU * 100) : 0;
+  const cpuPct = allocationPercent(usedCPU, totalAvailCPU);
 
-  document.getElementById('gpu-util-pct').textContent = `${Math.round(gpuPct)}%`;
+  document.getElementById('gpu-util-pct').textContent = gpuPct == null ? '—' : `${Math.round(gpuPct)}%`;
   document.getElementById('gpu-util-hours').innerHTML =
-    `<span>${fmtHours(usedGPU)}</span><span class="hours-sep">/ ${fmtHours(totalAvailGPU)}</span><span class="hours-unit">GPU-hours</span>`;
+    `<span>${fmtHours(usedGPU)}</span><span class="hours-sep">/ ${totalAvailGPU == null ? '—' : fmtHours(totalAvailGPU)}</span><span class="hours-unit">GPU-hours</span>`;
 
-  document.getElementById('cpu-util-pct').textContent = `${Math.round(cpuPct)}%`;
+  document.getElementById('cpu-util-pct').textContent = cpuPct == null ? '—' : `${Math.round(cpuPct)}%`;
   document.getElementById('cpu-util-hours').innerHTML =
-    `<span>${fmtHours(usedCPU)}</span><span class="hours-sep">/ ${fmtHours(totalAvailCPU)}</span><span class="hours-unit">CPU-hours</span>`;
+    `<span>${fmtHours(usedCPU)}</span><span class="hours-sep">/ ${totalAvailCPU == null ? '—' : fmtHours(totalAvailCPU)}</span><span class="hours-unit">CPU-hours</span>`;
+  const note = document.getElementById('capacity-note');
+  const from = data.capacity_known_from_ms;
+  note.textContent = data.capacity_coverage_complete
+    ? 'Percentages use installed GPU/CPU-hours over the selected period. Drain/down status does not reduce the denominator.'
+    : from == null
+      ? 'Historical capacity is unknown for this range; percentages are unavailable.'
+      : `Capacity history starts ${new Date(from).toLocaleString()}. Select a range after that time for percentages; earlier capacity is unknown.`;
 }
 
 // ── Wait time chart & metrics ─────────────────────────────────
@@ -567,6 +614,7 @@ function fmtSidebarH(h) {
 }
 
 function fmtSidebarPct(p) {
+  if (p == null) return '—';
   if (p === 0) return '—';
   return p < 0.1 ? '<0.1%' : p.toFixed(1) + '%';
 }
@@ -576,9 +624,8 @@ function renderSidebar(filter = '') {
   const list = document.getElementById('user-list');
   if (!data) return;
 
-  const bucketHours = data.bucket_size_ms / 3_600_000;
-  const totalAvailGPU = (data.total_gpus || data.node_count * data.gpus_per_node) * data.buckets.length * bucketHours;
-  const totalAvailCPU = (data.total_cpus || data.node_count * data.cpus_per_node) * data.buckets.length * bucketHours;
+  const totalAvailGPU = installedHours('gpus');
+  const totalAvailCPU = installedHours('cpus');
 
   const lf = filter.toLowerCase();
   const filtered = filter ? allUsers.filter(u => u.toLowerCase().includes(lf)) : allUsers;
@@ -586,10 +633,10 @@ function renderSidebar(filter = '') {
   const rowsHtml = filtered.map((u, i) => {
     const checked = visibleUsers.has(u);
     const color = userColors[u] || '#888';
-    const gpuH = (data.users[u] || []).reduce((s, v) => s + v, 0) * bucketHours;
-    const cpuH = ((data.cpu_users || {})[u] || []).reduce((s, v) => s + v, 0) * bucketHours;
-    const gpuP = totalAvailGPU > 0 ? gpuH / totalAvailGPU * 100 : 0;
-    const cpuP = totalAvailCPU > 0 ? cpuH / totalAvailCPU * 100 : 0;
+    const gpuH = resourceHours(data.users[u]);
+    const cpuH = resourceHours((data.cpu_users || {})[u]);
+    const gpuP = allocationPercent(gpuH, totalAvailGPU);
+    const cpuP = allocationPercent(cpuH, totalAvailCPU);
     return `
       <tr class="user-row${checked ? ' checked' : ''}" data-idx="${i}">
         <td class="col-cb"><input type="checkbox" ${checked ? 'checked' : ''} /></td>
@@ -699,8 +746,8 @@ async function fetchAndRender() {
   ]);
   // Sort by GPU usage descending
   state.allUsers = [...userSet].sort((a, b) => {
-    const sumA = (data.users[a] || []).reduce((s, v) => s + v, 0);
-    const sumB = (data.users[b] || []).reduce((s, v) => s + v, 0);
+    const sumA = resourceHours(data.users[a], data);
+    const sumB = resourceHours(data.users[b], data);
     return sumB - sumA;
   });
 

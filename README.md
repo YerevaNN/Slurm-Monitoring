@@ -40,3 +40,44 @@ SLURM_DASHBOARD_DISABLE_RECORDER=1 python -m unittest discover -s tests
 
 An optional historical Parameter Golf production regression requires an explicit
 `SLURM_PARAMETER_GOLF_TEST_DB` fixture path and otherwise skips.
+
+## Historical installed capacity
+
+
+The usage API and charts integrate installed GPU/CPU capacity over the requested
+time range. White step lines show installed capacity; amber drain and red down
+lines are separate diagnostics and never reduce the installed-capacity denominator.
+Summary and sidebar percentages use allocated resource-hours divided by installed
+resource-hours. Bucket durations are clipped to the selected end and current time,
+including a final partial bucket. Tooltips compare bucket-average allocation with
+time-weighted capacity in the same bucket.
+
+The recorder saves changes in `capacity_history` (per-node capacities, drain/down
+states/reasons, timestamp and source). Identical polls and ordinary idle/mixed
+changes do not add rows. Installed capacity changes on node addition/removal or
+resource-count changes, not job starts or drain transitions. Failed/partial node
+discovery is rejected rather than recorded as zero capacity. This history is not
+subject to disk-sample or job retention.
+
+Upgrading seeds history from the last known metadata timestamp only. Capacity
+before the first evidenced snapshot remains unknown: the UI shows the gap and
+suppresses whole-range percentages rather than applying today's capacity to it.
+For a range fully covered by capacity history, percentages include all selected
+time, even where allocation history itself may be incomplete.
+
+To import reviewed historical snapshots, first back up the database, then run:
+
+```bash
+python scripts/import_capacity_history.py --db data/slurm_history.db \
+  --snapshots capacity-snapshots.json
+```
+
+Each snapshot supplies `timestamp_ms`, per-node `node_capacities` with integer
+`gpus`/`cpus`, optional `node_states`/`node_reasons`, and an evidence `source`.
+Import only reviewed evidence for the database's own cluster. Identical imports
+are idempotent; conflicts fail atomically. Do not infer historical capacity from
+job occupancy. Node registration includes validation partitions; draining does
+not remove installed capacity.
+
+Run `node tests/test_usage_capacity.js` for frontend calculations, tooltips and
+filtering regression checks.
