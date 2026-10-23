@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <base href="./" />
+  <title>Slurm – Usage History</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="usage.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/luxon@3/build/global/luxon.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1/dist/chartjs-adapter-luxon.umd.min.js"></script>
+</head>
+<body class="usage-page">
+  <header class="header">
+    <h1>Slurm cluster</h1>
+    <nav class="nav-tabs">
+      <a href="./" class="nav-tab">Dashboard</a>
+      <a href="usage" class="nav-tab nav-tab--active">Usage</a>
+    </nav>
+    <div class="controls"></div>
+  </header>
+
+  <div class="usage-controls">
+    <label class="ctrl-label">From</label>
+    <input type="datetime-local" id="from-date" />
+    <label class="ctrl-label">To</label>
+    <input type="datetime-local" id="to-date" />
+    <div class="preset-group">
+      <button class="preset-btn" data-preset="last1">Last 1d</button>
+      <button class="preset-btn" data-preset="last2">Last 2d</button>
+      <button class="preset-btn" data-preset="last4">Last 4d</button>
+      <button class="preset-btn" data-preset="last7">Last 7d</button>
+      <button class="preset-btn" data-preset="last30">Last 30d</button>
+      <button class="preset-btn" data-preset="thismonth">This month</button>
+      <button class="preset-btn" data-preset="lastmonth">Last month</button>
+      <button class="preset-btn" data-preset="last3months">Last 3 months</button>
+      <button class="preset-btn" data-preset="last6months">Last 6 months</button>
+      <button class="preset-btn" data-preset="lastyear">Last year</button>
+    </div>
+    <button id="apply-btn" class="apply-btn">Apply</button>
+    <div class="view-toggle" role="group" aria-label="View by">
+      <button class="view-btn active" data-view="users">Users</button>
+      <button class="view-btn" data-view="projects">Projects</button>
+      <button class="view-btn" data-view="units">Units</button>
+    </div>
+  </div>
+
+  <div class="loading-overlay" id="loading-overlay">
+    <div class="loading-spinner"></div>
+  </div>
+
+  <div class="usage-layout">
+    <main class="usage-main">
+      <!-- GPU section -->
+      <div class="hero-block">
+        <div class="hero-left">
+          <div class="hero-label"><span class="accent-dot gpu-dot"></span>GPU</div>
+          <div class="hero-pct" id="gpu-util-pct">—%</div>
+          <div class="hero-hours" id="gpu-util-hours"></div>
+        </div>
+        <div class="chart-container">
+          <canvas id="gpu-chart"></canvas>
+        </div>
+      </div>
+
+      <!-- CPU section -->
+      <div class="hero-block">
+        <div class="hero-left">
+          <div class="hero-label"><span class="accent-dot cpu-dot"></span>CPU</div>
+          <div class="hero-pct" id="cpu-util-pct">—%</div>
+          <div class="hero-hours" id="cpu-util-hours"></div>
+        </div>
+        <div class="chart-container">
+          <canvas id="cpu-chart"></canvas>
+        </div>
+      </div>
+
+      <!-- Wait time section -->
+      <div class="hero-block">
+        <div class="hero-left wait-stats-left">
+          <div class="hero-label"><span class="accent-dot wait-dot"></span>Wait</div>
+          <div id="wait-stats-grid" class="wait-stats-grid"></div>
+        </div>
+        <div class="chart-container">
+          <canvas id="wait-chart"></canvas>
+        </div>
+      </div>
+
+      <!-- Queue section -->
+      <div class="hero-block">
+        <div class="hero-left">
+          <div class="hero-label"><span class="accent-dot queue-dot"></span>Queue</div>
+          <div class="chart-description">Average GPUs waiting in each time bucket</div>
+        </div>
+        <div class="chart-container">
+          <canvas id="queue-chart"></canvas>
+        </div>
+      </div>
+    </main>
+
+    <aside class="usage-sidebar">
+      <div class="sidebar-header">
+        <span id="sidebar-label">Users</span>
+        <span id="user-count" class="sidebar-count"></span>
+        <button id="open-editor" class="sidebar-gear" title="Manage projects &amp; units">&#9881;</button>
+      </div>
+      <div class="sidebar-search-row">
+        <input type="text" id="user-search" placeholder="Filter users…" />
+      </div>
+      <div class="sidebar-actions">
+        <button id="select-matching">Select matching</button>
+        <button id="deselect-matching">Deselect matching</button>
+      </div>
+      <div id="user-list" class="user-list"></div>
+    </aside>
+  </div>
+
+  <!-- Project/Unit editor modal -->
+  <div id="editor-modal" class="modal-overlay" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div class="modal-header">
+        <h2 id="modal-title">Manage Projects &amp; Units</h2>
+        <button class="modal-close" id="close-editor" aria-label="Close">&times;</button>
+      </div>
+      <div class="modal-tabs" role="tablist">
+        <button class="modal-tab active" data-tab="units" role="tab">Research Units</button>
+        <button class="modal-tab" data-tab="projects" role="tab">Projects</button>
+        <button class="modal-tab" data-tab="unassigned" role="tab">Unassigned <span id="unassigned-badge" class="tab-badge"></span></button>
+      </div>
+      <div class="modal-body">
+
+        <!-- Units tab -->
+        <div id="tab-units" class="tab-panel">
+          <div id="units-list" class="editor-list"></div>
+          <div class="editor-add-row">
+            <input type="text" id="new-unit-title" placeholder="Unit name…" class="editor-input" />
+            <input type="color" id="new-unit-color" value="#3b82f6" class="editor-color" title="Pick color" />
+            <button id="add-unit-btn" class="editor-add-btn">+ Add Unit</button>
+          </div>
+        </div>
+
+        <!-- Projects tab -->
+        <div id="tab-projects" class="tab-panel" hidden>
+          <div id="projects-list" class="editor-list"></div>
+          <div class="editor-add-row">
+            <input type="text" id="new-project-title" placeholder="Project name…" class="editor-input" />
+            <select id="new-project-unit" class="editor-select">
+              <option value="">— No unit —</option>
+            </select>
+            <button id="add-project-btn" class="editor-add-btn">+ Add Project</button>
+          </div>
+        </div>
+
+        <!-- Unassigned tab -->
+        <div id="tab-unassigned" class="tab-panel" hidden>
+          <div id="unassigned-list" class="editor-list"></div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+  </div>
+
+  <!-- Datalist for user autocomplete in assignment forms -->
+  <datalist id="known-users-list"></datalist>
+
+  <script src="usage.js"></script>
+</body>
+</html>

@@ -1,68 +1,42 @@
 # Slurm Cluster Dashboard
 
-Real-time and historical monitoring dashboard for Slurm clusters showing active jobs on GPU and CPU timelines.
+Flask dashboard with live GPU/CPU allocation timelines, historical allocation and
+queue/wait charts, aggregate filesystem samples, and user/project/unit grouping.
 
-## Features
+## Run
 
-- **Dual timeline view**: GPU and CPU resource allocation per node
-- **Job details**: Hover for job info (ID, user, task, priority, resources, runtime, wait time)
-- **Real-time updates**: Auto-refresh at configurable intervals (5/10/30/60s)
-- **Historical view**: View any past time window (e.g. full 24h from 3 days ago)
-- **Interactive timeline**: Zoom in/out, view relative time (hours/days from now)
-- **Visual highlights**: Pending jobs shown with transparency; unusual states (failed, cancelled) highlighted; down/drained nodes shown with overlays
-- **Job editing**: Click pending jobs to adjust priority, memory, and CPU allocation
-- **Auto-discovery**: Node list and capacities discovered from Slurm (no hardcoded node names)
-- **Job arrays**: Supports Slurm job arrays (pending grouped tasks, running individual tasks)
-- **Persistent storage**: SQLite-based history with one row per job (no snapshot redundancy)
+Requires Python 3.10+, Slurm CLI access (`squeue`, `sinfo`, `scontrol`), Flask and
+Gunicorn. Install in a persistent host with access to the controller:
 
-## Requirements
-
-- Python 3.10+
-- Slurm cluster with `squeue`, `scontrol`, and `sinfo` access
-
-## Setup
-
-1. Install dependencies:
 ```bash
-pip install -r requirements.txt
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/gunicorn --workers 1 --threads 4 --timeout 120 --bind 127.0.0.1:19526 app:app
 ```
 
-2. Run the dashboard:
+Use one worker: the serving process starts the background recorder, which polls
+at 10-second intervals by default. For maintenance imports and tests, set
+`SLURM_DASHBOARD_DISABLE_RECORDER=1`. Keep the SQLite database on local persistent
+storage at `data/slurm_history.db`; back it up using SQLite's backup API.
+
+Metadata editing requires `SLURM_DASHBOARD_ADMIN_TOKEN`, supplied through a
+protected environment file. Read-only monitoring and generated Slurm commands
+are available without that token; the app never executes generated job commands.
+Deployment, HTTP exposure and reverse-proxy settings are operator-managed.
+
+## Allocation semantics
+
+GPU-hours and CPU-hours measure allocated resources multiplied by elapsed time,
+not measured GPU/CPU utilization. Project and unit attribution follows explicit,
+time-bounded assignments and optional job-name rules. Historical views use epoch
+milliseconds; disk samples are aggregate filesystem readings, not per-user usage.
+Per-node capacities are discovered independently, including heterogeneous nodes.
+
+## Tests
+
 ```bash
-python app.py
+SLURM_DASHBOARD_DISABLE_RECORDER=1 python -m unittest discover -s tests
 ```
 
-The dashboard will:
-- Create a `data/` directory and initialize `slurm_history.db`
-- Start a background recorder that polls Slurm at the selected refresh interval
-- Serve the web UI at `http://localhost:19526`
-
-3. Open browser at `http://localhost:19526` (or configured port)
-
-## Configuration
-
-Edit `config.py` to customize:
-- `PORT`: Web server port (default: 19526)
-- `GPUS_PER_NODE`, `CPUS_PER_NODE`: Fallback resource counts (auto-discovered from sinfo)
-- `REFRESH_INTERVALS`, `DEFAULT_REFRESH`: Available refresh rates
-- `HISTORY_DB_PATH`: SQLite database path (default: `data/slurm_history.db`)
-- `HISTORY_RETENTION_DAYS`: How long to keep job history (default: 7 days)
-
-Set port via environment:
-```bash
-export SLURM_DASHBOARD_PORT=8080
-python app.py
-```
-
-## Using History Mode
-
-- **Live mode** (default): Shows current jobs and auto-refreshes
-- **History mode**: Pick a date/time in the datetime picker and click "View" to see jobs from that time window (±12h)
-- Click **"Live"** to return to real-time view
-
-## How It Works
-
-- **Background recorder**: Polls Slurm every N seconds (controlled by the refresh dropdown), stores one row per job in SQLite
-- **Job completion**: When a job disappears from `squeue`, the recorder calls `scontrol show job` to get the final state (COMPLETED, FAILED, etc.) before storing
-- **Time windows**: All views (live and history) query jobs that overlap the time window `[from, to]`
-- **No redundancy**: A 24-hour job is stored once; queries return all jobs in any time window
+An optional historical Parameter Golf production regression requires an explicit
+`SLURM_PARAMETER_GOLF_TEST_DB` fixture path and otherwise skips.
