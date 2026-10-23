@@ -3,12 +3,17 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <base href="./" />
   <title>Slurm cluster dashboard</title>
-  <link rel="stylesheet" href="/style.css" />
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <header class="header">
     <h1>Slurm cluster</h1>
+    <nav class="nav-tabs">
+      <a href="./" class="nav-tab nav-tab--active">Dashboard</a>
+      <a href="usage" class="nav-tab">Usage</a>
+    </nav>
     <div class="controls">
       <label>Refresh</label>
       <select id="refresh-interval" aria-label="Refresh interval">
@@ -19,38 +24,37 @@
       </select>
       <button id="zoom-out" type="button" aria-label="Zoom out">−</button>
       <button id="zoom-in" type="button" aria-label="Zoom in">+</button>
+      <select id="history-preset" aria-label="Quick history">
+        <option value="">Jump to...</option>
+        <option value="1">1 hour ago</option>
+        <option value="3">3 hours ago</option>
+        <option value="6">6 hours ago</option>
+        <option value="12">12 hours ago</option>
+        <option value="24">1 day ago</option>
+        <option value="48">2 days ago</option>
+        <option value="72">3 days ago</option>
+        <option value="168">1 week ago</option>
+      </select>
+      <input type="date" id="history-date" aria-label="Pick date" title="Pick date" />
+      <input type="time" id="history-time" aria-label="Pick time" title="Pick time" />
+      <button id="view-history" type="button" aria-label="View history">View</button>
+      <button id="live-mode" type="button" aria-label="Live mode">Live</button>
       <span id="last-updated" class="last-updated"></span>
     </div>
   </header>
   <div id="job-tooltip" class="job-tooltip" aria-hidden="true"></div>
   <div id="job-edit-popup" class="job-edit-popup" aria-hidden="true">
-    <table class="job-edit-table">
-      <tr>
-        <th>Priority</th>
-        <td>
-          <button type="button" class="edit-btn edit-minus" data-field="priority" aria-label="Decrease">−</button>
-          <input type="number" id="edit-priority" class="edit-input" min="0" step="1" />
-          <button type="button" class="edit-btn edit-plus" data-field="priority" aria-label="Increase">+</button>
-        </td>
-      </tr>
-      <tr>
-        <th>Memory (MB)</th>
-        <td>
-          <button type="button" class="edit-btn edit-minus" data-field="memory_mb" aria-label="Decrease">−</button>
-          <input type="number" id="edit-memory_mb" class="edit-input" min="0" step="1" />
-          <button type="button" class="edit-btn edit-plus" data-field="memory_mb" aria-label="Increase">+</button>
-        </td>
-      </tr>
-      <tr>
-        <th>CPUs</th>
-        <td>
-          <button type="button" class="edit-btn edit-minus" data-field="num_cpus" aria-label="Decrease">−</button>
-          <input type="number" id="edit-num_cpus" class="edit-input" min="0" step="1" />
-          <button type="button" class="edit-btn edit-plus" data-field="num_cpus" aria-label="Increase">+</button>
-        </td>
-      </tr>
-    </table>
-    <button type="button" class="edit-save" aria-label="Save">✓ Save</button>
+    <div class="job-edit-row">
+      <span class="job-edit-label">Priority</span>
+      <button type="button" class="edit-btn edit-minus" aria-label="Decrease priority">−</button>
+      <input type="number" id="edit-priority" class="edit-input" min="0" step="2" />
+      <button type="button" class="edit-btn edit-plus" aria-label="Increase priority">+</button>
+      <button type="button" class="edit-save" aria-label="Generate command">Generate command</button>
+    </div>
+    <div id="job-command-result" class="job-command-result" hidden>
+      <input id="job-command-text" class="job-command-text" type="text" readonly />
+      <button id="job-command-copy" type="button" class="edit-save">Copy</button>
+    </div>
   </div>
   <main class="dashboard">
     <div class="half gpu-half">
@@ -62,6 +66,6 @@
       <div id="cpu-timelines" class="timelines"></div>
     </div>
   </main>
-  <script src="/app.js"></script>
+  <script src="app.js"></script>
 </body>
 </html>
