@@ -335,7 +335,7 @@ function renderMetrics() {
   const note = document.getElementById('capacity-note');
   const from = data.capacity_known_from_ms;
   note.textContent = data.capacity_coverage_complete
-    ? 'Percentages use installed GPU/CPU-hours over the selected period. Drain/down status does not reduce the denominator.'
+    ? ''
     : from == null
       ? 'Historical capacity is unknown for this range; percentages are unavailable.'
       : `Capacity history starts ${new Date(from).toLocaleString()}. Select a range after that time for percentages; earlier capacity is unknown.`;
