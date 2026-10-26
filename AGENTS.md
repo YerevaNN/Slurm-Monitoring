@@ -14,6 +14,8 @@ All timestamps in the database use Unix epoch milliseconds. JSON-shaped values a
 - `meta`: singleton row with `id = 1`. Stores node list, node states, node drain reasons, discovered GPUs/CPUs per node, and update timestamp.
 - `capacity_history`: change-only snapshots of installed per-node GPU/CPU counts, separate drain/down states/reasons, epoch-ms timestamps and evidence source. Never infer old installed capacity from current metadata or job occupancy. `update_meta()` records changes; `import_capacity_history()` accepts reviewed backfills. Keep this history when cleaning jobs or disk samples.
 - `disk_samples`: one row per recorder poll with `timestamp_ms` and `samples_json`, a JSON list of filesystem usage samples.
+- `gpu_samples`: raw per-job identity/node/GPU readings. Preserve readings while jobs run; cleanup expires them 24 hours after the recorded end, retaining lifetime summaries.
+- `gpu_summaries`: permanent per-GPU moments, peaks and latest readings. Missing metric counters stay null and have independent sample counts; never substitute allocation-hours for measured activity.
 - `research_units`: editable grouping records with unique `title` and display `color`.
 - `projects`: project records with optional `unit_id` and `sort_order`.
 - `project_assignments`: time-bounded user-to-project assignments with `start_time_ms` and optional `end_time_ms`.

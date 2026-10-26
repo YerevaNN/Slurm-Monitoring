@@ -1,6 +1,10 @@
 """Flask app: serve dashboard and /api/jobs."""
 import hmac
+import json
 import os
+from pathlib import Path
+import re
+import subprocess
 import threading
 import time
 from functools import wraps
@@ -43,6 +47,68 @@ _duration_stats_lock = threading.Lock()
 _partitions_cache: dict[str, dict[str, int]] | None = None
 _partitions_cache_ts: float = 0.0
 _partitions_lock = threading.Lock()
+_gpu_cleanup_slot = None
+
+
+def gpu_ingest_token():
+    directory = os.environ.get("CREDENTIALS_DIRECTORY")
+    explicit_path = os.environ.get("SLURM_GPU_INGEST_TOKEN_FILE")
+    if not directory and not explicit_path:
+        return ""
+    try:
+        path = Path(explicit_path) if explicit_path else Path(directory) / "gpu-token"
+        return path.read_text().strip()
+    except OSError:
+        return ""
+
+
+@app.route("/api/gpu-allocations/<node>")
+def api_gpu_allocations(node):
+    token = gpu_ingest_token()
+    supplied = request.headers.get("X-GPU-Monitor-Token", "")
+    if not token:
+        return jsonify({"error": "GPU collection disabled"}), 503
+    if not supplied or not hmac.compare_digest(token.encode(), supplied.encode()):
+        return jsonify({"error": "GPU collector token required"}), 401
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", node):
+        return jsonify({"error": "Invalid node"}), 400
+    # Node agents need no Slurm client binaries. No cache: the second lookup
+    # must see requeues/reallocations that occurred during the GPU query.
+    from gpu_metrics import parse_allocations
+    try:
+        output = subprocess.run(["scontrol", "show", "job", "-d", "-o"],
+                                capture_output=True, text=True, timeout=8, check=True).stdout
+        jobs = parse_allocations(output, node, list(range(4096)))
+        return jsonify({"jobs": [{k: v for k, v in j.items() if k != "minors"} |
+                                 {"gpu_indices": j["minors"]} for j in jobs]})
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return jsonify({"error": "Scheduler allocations unavailable"}), 503
+
+
+@app.route("/api/gpu-samples", methods=["POST"])
+def api_gpu_samples():
+    token = gpu_ingest_token()
+    if not token:
+        return jsonify({"error": "GPU collection disabled"}), 503
+    supplied = request.headers.get("X-GPU-Monitor-Token", "")
+    if not supplied or not hmac.compare_digest(token.encode(), supplied.encode()):
+        return jsonify({"error": "GPU collector token required"}), 401
+    try:
+        raw = request.stream.read(131073)
+        if len(raw) > 131072:
+            return jsonify({"error": "Sample too large"}), 413
+        count = history.ingest_gpu_sample(config.HISTORY_DB_PATH, json.loads(raw), int(time.time() * 1000))
+        return jsonify({"inserted": count})
+    except (ValueError, TypeError, KeyError):
+        return jsonify({"error": "Invalid GPU sample"}), 400
+
+
+@app.route("/api/job/<job_id>/gpu")
+def api_job_gpu(job_id):
+    submit = request.args.get("submit", type=int)
+    if submit is None:
+        return jsonify({"error": "Missing submit timestamp"}), 400
+    return jsonify(history.get_gpu_trend(config.HISTORY_DB_PATH, job_id, submit))
 
 
 def get_partitions(meta: dict | None = None) -> dict[str, dict[str, int]]:
@@ -119,6 +185,7 @@ def api_jobs():
     
     # Read from DB
     jobs = history.get_jobs_in_window(config.HISTORY_DB_PATH, from_ms, to_ms)
+    history.get_gpu_metrics(config.HISTORY_DB_PATH, jobs, int(time.time() * 1000))
     meta = history.get_latest_meta(config.HISTORY_DB_PATH)
     
     return jsonify({
@@ -353,6 +420,7 @@ def recorder_loop():
 
 def run_recorder_cycle():
     """One recorder cycle: fetch, upsert, close stale, cleanup."""
+    global _gpu_cleanup_slot
     try:
         now_ms = int(time.time() * 1000)
         jobs = fetch_jobs()
@@ -388,6 +456,10 @@ def run_recorder_cycle():
         if disk_samples:
             history.insert_disk_sample(config.HISTORY_DB_PATH, disk_samples, now_ms)
         history.cleanup_disk_samples(config.HISTORY_DB_PATH, config.DISK_RETENTION_DAYS)
+        slot = now_ms // 300_000
+        if _gpu_cleanup_slot != slot:
+            history.cleanup_gpu_samples(config.HISTORY_DB_PATH, now_ms)
+            _gpu_cleanup_slot = slot
     except Exception as e:
         print(f"Recorder error: {e}")
         import traceback

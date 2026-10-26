@@ -12,6 +12,43 @@
   --font-mono: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
 }
 
+.gpu-activity-legend { flex: 0 0 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 5px 14px; color: #a1a1aa; border-bottom: 1px solid var(--border); font-size: 10px; }
+.gpu-activity-legend span, .gpu-metric-badge { display: inline-block; color: #fff; border-radius: 3px; padding: 3px 6px; white-space: nowrap; }
+.gpu-activity-legend small { margin-left: auto; font-size: inherit; }
+.gpu-job-dialog { width: min(1100px, 94vw); max-height: 90vh; padding: 0; color: var(--text); background: var(--surface); border: 1px solid #52525b; border-radius: 8px; font: inherit; }
+.gpu-job-dialog::backdrop { background: rgba(0,0,0,.65); }
+.gpu-dialog-heading { position: sticky; top: 0; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 16px; background: var(--surface); border-bottom: 1px solid var(--border); z-index: 1; }
+.gpu-dialog-heading h2 { margin: 0; font-size: 15px; overflow-wrap: anywhere; }
+.gpu-dialog-close { background: var(--bg); color: var(--text); border: 1px solid #52525b; padding: 6px 10px; border-radius: 4px; cursor: pointer; font: inherit; }
+.gpu-dialog-content { padding: 0 16px 12px; }
+.gpu-dialog-content p { color: #a1a1aa; line-height: 1.6; }
+.gpu-detail-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.gpu-detail-metric { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; padding: 12px; background: var(--row-bg); border-radius: 5px; }
+.gpu-detail-metric small { flex-basis: 100%; color: #a1a1aa; }
+.gpu-table-scroll { overflow-x: auto; }
+.gpu-device-table { width: 100%; border-collapse: collapse; }
+.gpu-device-table td, .gpu-device-table th { padding: 8px 6px; border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; }
+.gpu-job-chart svg { width: 100%; min-width: 420px; }
+.gpu-job-chart { overflow-x: auto; }
+.gpu-job-chart text { fill: #a1a1aa; font-size: 11px; }
+.gpu-job-chart svg { cursor: crosshair; }
+.gpu-chart-tooltip { position: fixed; pointer-events: none; z-index: 5; background: #0b1220; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; padding: 10px 12px; box-shadow: 0 6px 24px #0008; min-width: 235px; font-size: 11px; }
+.gpu-chart-tooltip strong { display: block; margin-bottom: 8px; }
+.gpu-chart-tooltip div { display: flex; justify-content: space-between; gap: 20px; padding: 3px 0; }
+.gpu-chart-tooltip small { display: block; margin-top: 7px; color: #94a3b8; }
+.gpu-graph-legend { display: flex; flex-wrap: wrap; gap: 20px; }
+.gpu-graph-legend span { color: var(--series-color); }
+.gpu-graph-legend span::before { content: ''; display: inline-block; width: 24px; border-top: 2px solid currentColor; margin-right: 6px; vertical-align: middle; }
+.row-chart text.label.gpu-activity-label { fill: #f8fafc; paint-order: stroke; stroke: rgba(0,0,0,.65); stroke-width: 1.3px; }
+.timeline-row-pending .row-chart text.label { fill: #f8fafc; opacity: 1; paint-order: stroke; stroke: rgba(0,0,0,.65); stroke-width: 1.3px; }
+.timeline-bar.job-bar.main { cursor: pointer; }
+.timeline-bar.job-bar.main:focus { outline: none; stroke: #fff; stroke-width: 2px; }
+@media (max-width: 650px) { .gpu-detail-metrics { grid-template-columns: 1fr; } }
+@media (max-width: 850px) {
+  .header { flex-wrap: wrap; gap: 8px; padding: 10px; }
+  .header h1 { flex: 1 1 100%; }
+  .header .controls { flex-wrap: wrap; gap: 6px; }
+}
 * { box-sizing: border-box; }
 
 body {

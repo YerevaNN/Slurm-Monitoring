@@ -56,6 +56,12 @@
       <button id="job-command-copy" type="button" class="edit-save">Copy</button>
     </div>
   </div>
+  <div class="gpu-activity-legend" aria-label="Job color legend">Job color = average GPU activity:
+    <span style="background:#b91c1c">0–19%</span><span style="background:#c2410c">20–39%</span><span style="background:#a16207">40–59%</span><span style="background:#4d7c0f">60–79%</span><span style="background:#15803d">80–100%</span><span style="background:#64748b">No measurements</span>
+    <span style="background:#2563eb" title="Pending: blue; dependencies: violet; impossible dependencies: magenta; QOS: cyan; held: slate">Pending jobs</span>
+    <span style="background:#566477">CPU only</span>
+    <small>Click a job for details</small>
+  </div>
   <main class="dashboard">
     <div class="half gpu-half">
       <div class="half-label">GPU</div>
@@ -66,6 +72,7 @@
       <div id="cpu-timelines" class="timelines"></div>
     </div>
   </main>
+  <script src="gpu-telemetry.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

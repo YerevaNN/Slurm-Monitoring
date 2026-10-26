@@ -48,6 +48,7 @@
   // A compact pending-array row may represent hundreds of tasks. Keep one
   // array bar no taller than a node row and show its true demand in a badge.
   const MAX_PENDING_BAR_NODES = 1;
+  const CPU_ONLY_COLOR = "#566477";
 
   let state = {
     jobs: [],
@@ -182,19 +183,21 @@
     return PALETTE[h % PALETTE.length];
   }
 
-  // Colors for special pending reasons; falls back to jobColor for Resources/Priority/etc.
-  // Held jobs are parked by choice rather than blocked, hence the muted slate.
+  // Pending jobs use cool hues, separate from the red-to-green activity scale.
+  const PENDING_PALETTE = ["#2563eb", "#3b82f6", "#4f46e5", "#6366f1", "#0284c7", "#0ea5e9"];
   const PENDING_REASON_COLORS = {
-    "Dependency":                "#f59e0b",  // amber
-    "DependencyNeverSatisfied":  "#ef4444",  // red
-    "QOSMaxGRESPerUser":         "#8b5cf6",  // purple
-    "JobHeldUser":               "#64748b",  // slate
-    "JobHeldAdmin":              "#64748b",  // slate
+    "Dependency":                "#8b5cf6",  // violet
+    "DependencyNeverSatisfied":  "#c026d3",  // magenta
+    "QOSMaxGRESPerUser":         "#0891b2",  // cyan
+    "JobHeldUser":               "#475569",  // slate
+    "JobHeldAdmin":              "#475569",  // slate
   };
 
   function pendingColor(job) {
     const r = (job.pending_reason || "").trim();
-    return PENDING_REASON_COLORS[r] || jobColor(job.job_id);
+    let hash = 0;
+    for (const c of String(job.job_id)) hash = (hash * 31 + c.charCodeAt(0)) >>> 0;
+    return PENDING_REASON_COLORS[r] || PENDING_PALETTE[hash % PENDING_PALETTE.length];
   }
 
   /**
@@ -320,6 +323,7 @@
       <tr><th>Typical duration</th><td>${formatTypicalDuration(job)}</td></tr>
       <tr><th>${escapeHtml(waitLabel)}</th><td>${waitStr}</td></tr>
       <tr><th>State</th><td>${escapeHtml(job.state || "—")}</td></tr>
+      ${window.GpuTelemetry ? window.GpuTelemetry.tooltip(job) : ""}
       ${job.pending_reason ? `<tr><th>Reason</th><td>${escapeHtml(job.pending_reason)}</td></tr>` : ""}
     </table>`;
   }
@@ -357,7 +361,9 @@
 
     state.jobs.forEach((job) => {
       const unusual = isUnusual(job.state);
-      const color = job.state === "PENDING" ? pendingColor(job) : jobColor(job.job_id);
+      const hasGpu = (job.req_gpus || 0) > 0 || (job.allocations || []).some(a => a.gpus > 0);
+      const color = job.state === "PENDING" ? pendingColor(job)
+        : hasGpu ? (window.GpuTelemetry ? window.GpuTelemetry.jobColor(job) : "#64748b") : CPU_ONLY_COLOR;
       const start = job.start_time;
       const end = job.end_time || (start ? start + 3600000 : now + 3600000);
       const submit = job.submit_time;
@@ -795,7 +801,9 @@
         const rank = isPendingRow ? state.queueRanks[job.job_id] : null;
         const rankStr = rank != null ? "Q" + rank + " · " : "";
         const partStr = isPendingRow && job.partition ? " · " + job.partition : "";
-        const labelStr = rankStr + "#" + job.job_id + " · P=" + (job.priority != null ? job.priority : "—") + partStr + " · " + job.user + " · " + (job.job_name || job.job_id);
+        const avgGpu = window.GpuTelemetry ? window.GpuTelemetry.averageActivity(job) : null;
+        const activityStr = avgGpu != null ? " · GPU avg " + avgGpu.toFixed(0) + "%" : "";
+        const labelStr = rankStr + "#" + job.job_id + activityStr + " · P=" + (job.priority != null ? job.priority : "—") + partStr + " · " + job.user + " · " + (job.job_name || job.job_id);
         const prefix = slot.unusual ? UNUSUAL_EMOJI + " " : "";
 
         if (slot.waitStart != null && slot.waitEnd != null) {
@@ -832,6 +840,10 @@
           rect.setAttribute("fill", slot.color);
           rect.setAttribute("data-job-id", job.job_id);
           rect.classList.add("timeline-bar", "job-bar", "main");
+          rect.style.fill = slot.color;
+          rect.setAttribute("role", "button");
+          rect.setAttribute("tabindex", "0");
+          rect.setAttribute("aria-label", "Job " + job.job_id + " details" + activityStr);
           if (slot.unusual) rect.classList.add("unusual");
           svg.appendChild(rect);
 
@@ -840,6 +852,7 @@
             text.setAttribute("x", x1 + 4);
             text.setAttribute("y", y + h / 2);
             text.setAttribute("class", "label timeline-bar main");
+            text.classList.add("gpu-activity-label");
             if (isGpuSide && h < 12) text.setAttribute("font-size", Math.max(7, h - 1));
             if (slot.unusual) text.classList.add("unusual");
             text.textContent = prefix + labelStr;
@@ -915,6 +928,10 @@
   }
 
   function render() {
+    if (window.GpuTelemetry?.isOpen()) {
+      window.GpuTelemetry.render(state.jobs, apiUrl);
+      return;
+    }
     state.queueRanks = computeQueueRanks();
     const gpuRows = buildRows(true);
     const cpuRows = buildRows(false);
@@ -936,6 +953,7 @@
     updateSummaryTitle();
     attachTooltipAndHighlight();
     attachJobEditPopup();
+    if (window.GpuTelemetry) window.GpuTelemetry.render(state.jobs, apiUrl);
   }
 
   function updateSummaryTitle() {
@@ -1097,12 +1115,25 @@
         if (!t || !t.getAttribute || !t.getAttribute("data-job-id")) return;
         const jobId = t.getAttribute("data-job-id");
         const job = state.jobs.find((j) => j.job_id === jobId);
-        if (!job || job.state !== "PENDING") return;
+        if (!job) return;
         ev.preventDefault();
         ev.stopPropagation();
+        if (job.state !== "PENDING") {
+          if (window.GpuTelemetry) window.GpuTelemetry.open(job, apiUrl);
+          return;
+        }
         open(jobId, job, ev);
       };
       el.addEventListener("click", el._jobEditClick);
+      if (!el._jobDetailsKeydown) {
+        el._jobDetailsKeydown = (ev) => {
+          if ((ev.key === "Enter" || ev.key === " ") && ev.target.matches('.job-bar.main[role="button"]')) {
+            ev.preventDefault();
+            ev.target.dispatchEvent(new MouseEvent("click", {bubbles: true}));
+          }
+        };
+        el.addEventListener("keydown", el._jobDetailsKeydown);
+      }
     });
   }
 
@@ -1304,6 +1335,7 @@
   });
 
   // Populate date/time inputs with current time on load
+  document.addEventListener("gpu-details-closed", render);
   populateDateTimePickers();
   
   setTimeRange(DEFAULT_HALF_WINDOW_HOURS);

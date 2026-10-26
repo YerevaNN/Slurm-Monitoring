@@ -16,6 +16,24 @@ def init_db(path: str):
         conn = sqlite3.connect(path)
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("""
+            CREATE TABLE IF NOT EXISTS gpu_summaries (
+                job_id TEXT NOT NULL, submit_time_ms INTEGER NOT NULL,
+                node TEXT NOT NULL, gpu_uuid TEXT NOT NULL,
+                first_ms INTEGER NOT NULL, last_ms INTEGER NOT NULL,
+                stats_json TEXT NOT NULL, latest_json TEXT NOT NULL,
+                PRIMARY KEY(job_id, submit_time_ms, node, gpu_uuid)
+            ) WITHOUT ROWID
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS gpu_samples (
+                job_id TEXT NOT NULL, submit_time_ms INTEGER NOT NULL,
+                node TEXT NOT NULL, gpu_uuid TEXT NOT NULL, timestamp_ms INTEGER NOT NULL,
+                gpu REAL, vram REAL, memory REAL, used_mib REAL,
+                PRIMARY KEY(job_id, submit_time_ms, node, gpu_uuid, timestamp_ms)
+            ) WITHOUT ROWID
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_gpu_sample_time ON gpu_samples(timestamp_ms)")
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS jobs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 job_id TEXT NOT NULL,
@@ -389,6 +407,151 @@ def get_latest_meta(db_path: str) -> dict[str, Any]:
             }
         finally:
             conn.close()
+
+
+def ingest_gpu_sample(db_path, payload, now_ms):
+    """Authenticated node snapshot; validate fully before a single atomic write.
+
+    Raw samples expire 24h after a recorded terminal state. Welford moments stay
+    forever. Duplicate timestamps never increment summaries, including retries.
+    """
+    from gpu_metrics import METRICS, number, update_moments
+    if not isinstance(payload, dict):
+        raise ValueError("Expected object")
+    node, ts, jobs = payload.get("node"), payload.get("timestamp_ms"), payload.get("jobs")
+    if not isinstance(node, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", node):
+        raise ValueError("Invalid node")
+    if not isinstance(ts, int) or ts < now_ms - 60_000 or ts > now_ms + 5_000:
+        raise ValueError("Stale or future sample")
+    if not isinstance(jobs, list) or len(jobs) > 128:
+        raise ValueError("Invalid jobs")
+    prepared, owners = [], set()
+    with _db_lock, sqlite3.connect(db_path, timeout=10) as conn:
+        for job in jobs:
+            if not isinstance(job, dict):
+                raise ValueError("Invalid job")
+            jid, submit, start = job.get("job_id"), job.get("submit_time_ms"), job.get("start_time_ms")
+            if not isinstance(jid, str) or not re.fullmatch(r"\d+(?:_\d+)?", jid):
+                raise ValueError("Invalid job identity")
+            if not isinstance(submit, int) or not isinstance(start, int) or start > ts or submit > start:
+                raise ValueError("Invalid job timestamps")
+            row = conn.execute("SELECT state, start_time_ms, allocations_json FROM jobs WHERE job_id=? AND submit_time_ms=?",
+                               (jid, submit)).fetchone()
+            # Recorder may trail a newly started array task by one poll. Retry next sample.
+            if not row or row[0] != "RUNNING" or row[1] != start:
+                continue
+            expected = sum(a.get("gpus", 0) for a in json.loads(row[2] or "[]") if a.get("node") == node)
+            devices = job.get("gpus")
+            if not isinstance(devices, list) or not devices or len(devices) != expected:
+                raise ValueError("GPU count does not match scheduler allocation")
+            for device in devices:
+                if not isinstance(device, dict):
+                    raise ValueError("Invalid device")
+                uuid, minor = device.get("uuid"), device.get("minor")
+                if not isinstance(uuid, str) or not re.fullmatch(r"GPU-[A-Za-z0-9-]{1,100}", uuid):
+                    raise ValueError("Invalid GPU UUID")
+                if not isinstance(minor, int) or minor < 0 or uuid in owners:
+                    raise ValueError("Ambiguous GPU ownership")
+                owners.add(uuid)
+                clean = {"uuid": uuid, "minor": minor, "start_time_ms": start}
+                for metric in (*METRICS, "total_mib"):
+                    val = device.get(metric)
+                    if val is not None and (not isinstance(val, (int, float)) or isinstance(val, bool) or number(val) is None):
+                        raise ValueError("Non-finite or negative counter")
+                    if metric in ("gpu", "vram", "memory") and val is not None and val > 100:
+                        raise ValueError("Percentage outside 0..100")
+                    clean[metric] = val
+                prepared.append((jid, submit, uuid, clean))
+        inserted = 0
+        for jid, submit, uuid, clean in prepared:
+            key = (jid, submit, node, uuid)
+            previous = conn.execute("SELECT first_ms,last_ms,stats_json FROM gpu_summaries WHERE job_id=? AND submit_time_ms=? AND node=? AND gpu_uuid=?", key).fetchone()
+            # Also reject out-of-order deliveries after raw data has been pruned.
+            if previous and ts <= previous[1]:
+                continue
+            conn.execute("INSERT INTO gpu_samples VALUES (?,?,?,?,?,?,?,?,?)",
+                         (*key, ts, *(clean[m] for m in METRICS)))
+            stats = json.loads(previous[2]) if previous else {}
+            for metric in METRICS:
+                update_moments(stats.setdefault(metric, {}), clean[metric])
+            stats["samples"] = stats.get("samples", 0) + 1
+            if stats.get("run_start") != clean["start_time_ms"]:
+                stats["run_start"], stats["run_samples"] = clean["start_time_ms"], 0
+            stats["run_samples"] += 1
+            conn.execute("INSERT OR REPLACE INTO gpu_summaries VALUES (?,?,?,?,?,?,?,?)",
+                         (*key, previous[0] if previous else ts, ts, json.dumps(stats), json.dumps(clean)))
+            inserted += 1
+        return inserted
+
+
+def cleanup_gpu_samples(db_path, now_ms):
+    """Keep all running-job samples; only prune jobs confirmed terminal >24h ago."""
+    terminal = ("COMPLETED", "FAILED", "CANCELLED", "TIMEOUT", "NODE_FAIL", "PREEMPTED", "OUT_OF_MEMORY", "BOOT_FAIL", "REVOKED", "SPECIAL_EXIT", "FINISHED_UNKNOWN")
+    with _db_lock, sqlite3.connect(db_path, timeout=10) as conn:
+        conn.execute(f"""DELETE FROM gpu_samples WHERE (job_id,submit_time_ms) IN
+            (SELECT job_id,submit_time_ms FROM jobs WHERE end_time_ms < ?
+             AND state IN ({','.join('?' for _ in terminal)}))""", (now_ms - 86_400_000, *terminal))
+
+
+def get_gpu_metrics(db_path, jobs, now_ms):
+    """Batch summaries; averages and population std are over observed GPU samples."""
+    from gpu_metrics import METRICS, PERIOD_MS, STALE_MS, combine_moments
+    identities = {(j["job_id"], j.get("submit_time")): j for j in jobs}
+    by_job = {}
+    with _db_lock, sqlite3.connect(db_path) as conn:
+        ids = list({k[0] for k in identities})
+        for offset in range(0, len(ids), 400):
+            chunk = ids[offset:offset + 400]
+            for row in conn.execute(f"SELECT * FROM gpu_summaries WHERE job_id IN ({','.join('?' for _ in chunk)})", chunk):
+                key = row[:2]
+                if key in identities:
+                    by_job.setdefault(key, []).append(row)
+    for key, rows in by_job.items():
+        job = identities[key]
+        devices = []
+        for row in rows:
+            raw = json.loads(row[6])
+            latest = json.loads(row[7])
+            live = (job.get("state") == "RUNNING" and latest["start_time_ms"] == job.get("start_time")
+                    and 0 <= now_ms - row[5] <= STALE_MS)
+            devices.append({"node": row[2], "uuid": row[3], "first_ms": row[4], "last_ms": row[5],
+                            "minor": latest["minor"], "total_mib": latest["total_mib"],
+                            "raw": raw, "lifetime": {m: combine_moments([raw.get(m, {})]) for m in METRICS},
+                            "current": latest if live else None})
+        current = {}
+        fresh = [d["current"] for d in devices if d["current"]]
+        for m in (*METRICS, "total_mib"):
+            values = [d[m] for d in fresh if d.get(m) is not None]
+            current[m] = sum(values) / len(values) if values else None
+        expected_gpus = sum(a.get("gpus", 0) for a in job.get("allocations", [])) or job.get("req_gpus", 0)
+        observed_gpu_ms = sum(d["raw"].get("samples", 0) * PERIOD_MS for d in devices)
+        current_run_ms = sum(d["raw"].get("run_samples", 0) * PERIOD_MS for d in devices
+                             if d["raw"].get("run_start") == job.get("start_time"))
+        elapsed = max(0, min(job.get("end_time") or now_ms, now_ms) - (job.get("start_time") or now_ms))
+        summary = {"lifetime": {m: combine_moments([d["raw"].get(m, {}) for d in devices]) for m in METRICS},
+                   "current": current, "fresh_gpus": len(fresh), "expected_gpus": expected_gpus,
+                   "first_ms": min(d["first_ms"] for d in devices), "last_ms": max(d["last_ms"] for d in devices),
+                   "observed_gpu_hours": observed_gpu_ms / 3_600_000,
+                   "coverage_pct": min(100, current_run_ms / (elapsed * expected_gpus) * 100) if elapsed and expected_gpus else None,
+                   "sample_period_sec": PERIOD_MS / 1000,
+                   "devices": [{k: v for k, v in d.items() if k != "raw"} for d in devices]}
+        job["gpu_telemetry"] = summary
+    return jobs
+
+
+def get_gpu_trend(db_path, job_id, submit_ms):
+    """At most ~720 job-average points, including min/max GPU activity per bin."""
+    with _db_lock, sqlite3.connect(db_path) as conn:
+        first, last = conn.execute("SELECT MIN(timestamp_ms),MAX(timestamp_ms) FROM gpu_samples WHERE job_id=? AND submit_time_ms=?", (job_id, submit_ms)).fetchone()
+        if first is None:
+            return {"points": [], "raw_retained": False}
+        width = max(15_000, (last - first) // 719 + 1)
+        points = conn.execute("""SELECT MIN(timestamp_ms),AVG(gpu),AVG(vram),AVG(memory),MIN(gpu),MAX(gpu),COUNT(*)
+            FROM gpu_samples WHERE job_id=? AND submit_time_ms=?
+            GROUP BY CAST((timestamp_ms-?) / ? AS INTEGER) ORDER BY MIN(timestamp_ms)""",
+            (job_id, submit_ms, first, width)).fetchall()
+        return {"raw_retained": True, "bucket_ms": width,
+                "points": [dict(zip(("t", "gpu", "vram", "memory", "gpu_min", "gpu_max", "n"), p)) for p in points]}
 
 
 def get_jobs_in_window(db_path: str, from_ms: int, to_ms: int) -> list[dict[str, Any]]:

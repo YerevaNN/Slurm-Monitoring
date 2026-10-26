@@ -1,0 +1,26 @@
+[Unit]
+Description=Per-job GPU telemetry sampler
+After=network-online.target slurmd.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=MONITOR_USER
+Group=MONITOR_GROUP
+LoadCredential=gpu-token:/etc/slurm-gpu-monitor/token
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/usr/bin/python3 /opt/slurm-gpu-monitor/scripts/gpu_node_sampler.py --node NODE_NAME --url http://CONTROLLER:19526/api/gpu-samples --gres /etc/slurm/gres.conf
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+MemoryMax=128M
+CPUQuota=50%
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

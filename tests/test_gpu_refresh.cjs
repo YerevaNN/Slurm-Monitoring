@@ -1,0 +1,88 @@
+// Run with jsdom available through NODE_PATH. No live cluster or network needed.
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const {JSDOM} = require('jsdom');
+
+async function main() {
+  const dom = new JSDOM('<body><div id="job-tooltip"></div></body>', {runScripts:'outside-only'});
+  const w = dom.window;
+  w.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
+  w.HTMLDialogElement.prototype.close = function () { this.open = false; this.dispatchEvent(new w.Event('close')); };
+  const requests = [];
+  w.fetch = () => new Promise((resolve, reject) => requests.push({resolve, reject}));
+  w.eval(fs.readFileSync(path.join(__dirname, '../static/gpu-telemetry.js'), 'utf8'));
+  const moments = {mean:40,std:10,n:2,peak:70};
+  const lifetime = {gpu:{...moments}, vram:{...moments}, memory:{...moments}, used_mib:{...moments}};
+  const job = {job_id:'42',submit_time:1000,job_name:'example',user:'alice',state:'RUNNING',
+    gpu_telemetry:{current:{gpu:40,vram:50,memory:60},lifetime, fresh_gpus:1,expected_gpus:1,
+      first_ms:1000,last_ms:16000,coverage_pct:100,
+      devices:[{node:'gpu01',uuid:'GPU-a',minor:0,total_mib:1024,first_ms:1000,last_ms:16000,lifetime,current:{gpu:40,vram:50,memory:60,used_mib:512}}]}};
+  const trend = {bucket_ms:15000,points:[{t:1000,gpu:40,vram:50,memory:60},{t:16000,gpu:50,vram:60,memory:70}]};
+  const tick = () => new Promise(resolve => setImmediate(resolve));
+  const finish = (index, data) => requests[index].resolve({ok:true,json:async()=>data});
+  w.GpuTelemetry.open(job, p => p);
+  finish(0, trend);
+  await tick();
+  const dialog = w.document.querySelector('dialog');
+  const body = dialog.querySelector('.gpu-dialog-content');
+  const svg = body.querySelector('svg');
+  const curve = svg.querySelector('path');
+  const badge = body.querySelector('.gpu-metric-badge');
+  const scroll = body.querySelector('.gpu-table-scroll');
+  const close = dialog.querySelector('button');
+  svg.getBoundingClientRect = () => ({left:0,top:0,width:980,height:195});
+  svg.dispatchEvent(new w.MouseEvent('pointermove', {bubbles:true,clientX:948,clientY:70}));
+  const tip = dialog.querySelector('.gpu-chart-tooltip');
+  assert.equal(tip.hidden, false);
+  assert.equal(tip.dataset.pointTime, '16000');
+  assert.match(tip.textContent, /1970/);
+  assert.match(tip.textContent, /GPU activity50.0%/);
+  assert.match(tip.textContent, /VRAM occupancy60.0%/);
+  assert.match(tip.textContent, /Memory activity70.0%/);
+  dialog.scrollTop = 120;
+  scroll.scrollLeft = 70;
+  close.focus();
+  const updated = JSON.parse(JSON.stringify(job));
+  updated.gpu_telemetry.current.gpu = 80;
+  w.GpuTelemetry.render([updated], p => p);
+  assert.equal(body.querySelector('svg'), svg, 'keep old chart visible during fetch');
+  assert.equal(body.querySelector('.gpu-metric-badge'), badge);
+  assert.equal(badge.textContent, '80.0%');
+  assert.equal(dialog.scrollTop, 120);
+  assert.equal(scroll.scrollLeft, 70);
+  assert.equal(w.document.activeElement, close);
+  assert.doesNotMatch(body.textContent, /Loading chart/);
+  finish(1, {...trend,points:[...trend.points,{t:31000,gpu:80,vram:90,memory:20}]});
+  await tick();
+  assert.equal(body.querySelector('svg'), svg, 'update chart attributes in place');
+  assert.equal(svg.querySelector('path'), curve);
+  assert.match(curve.getAttribute('d'), /L948\.00,46\.00/);
+  assert.equal(tip.dataset.pointTime, '31000', 'hover updates to the nearest point after refresh');
+  assert.match(tip.textContent, /GPU activity80.0%/);
+  body.querySelector('.gpu-job-chart').dispatchEvent(new w.MouseEvent('pointerleave'));
+  assert.equal(tip.hidden, true);
+  assert.equal(dialog.scrollTop, 120);
+  assert.equal(w.document.activeElement, close);
+  w.GpuTelemetry.render([updated], p => p);
+  requests[2].reject(new Error('temporary network failure'));
+  await tick();
+  assert.equal(body.querySelector('svg'), svg, 'network failures keep the last chart');
+  let closed = false;
+  w.document.addEventListener('gpu-details-closed', () => {closed=true;});
+  close.click();
+  assert.ok(closed);
+  assert.equal(w.GpuTelemetry.isOpen(), false);
+  const noTelemetry = {...job};
+  delete noTelemetry.gpu_telemetry;
+  const requestCount = requests.length;
+  w.GpuTelemetry.open(noTelemetry, p => p);
+  assert.match(body.textContent, /No GPU measurements available/);
+  assert.equal(requests.length, requestCount, 'no chart requests before telemetry exists');
+  w.GpuTelemetry.render([noTelemetry], p => p);
+  assert.equal(w.GpuTelemetry.isOpen(), true);
+  close.click();
+  dom.window.close();
+  console.log('GPU refresh preserves chart nodes, scroll, focus and last data on failure');
+}
+main().catch(error => {console.error(error);process.exitCode=1;});

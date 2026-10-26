@@ -1,0 +1,10 @@
+{
+  "name": "slurm-monitoring-tests",
+  "private": true,
+  "scripts": {
+    "test": "node tests/test_usage_capacity.js && node tests/test_gpu_telemetry.js && node tests/test_gpu_refresh.cjs && node --check static/app.js && node --check static/usage.js && node --check static/gpu-telemetry.js"
+  },
+  "devDependencies": {
+    "jsdom": "26.1.0"
+  }
+}
