@@ -342,26 +342,32 @@ def fetch_node_capacities() -> dict[str, dict[str, int]]:
     return capacities
 
 
-def fetch_partitions() -> dict[str, dict[str, int]]:
+def fetch_partitions() -> dict[str, dict[str, Any]]:
     """
-    Return partition name -> {priority_tier, job_factor} from scontrol show partition.
+    Return partition priorities and configured node membership from Slurm.
 
     PriorityTier is what actually orders the scheduler's queue: Slurm sorts pending
     jobs by tier first and only then by job priority, so a low-priority job in a
     high-tier partition is still considered before a high-priority job in a low tier.
     """
     out = _run(["scontrol", "show", "partition"])
-    partitions: dict[str, dict[str, int]] = {}
+    partitions: dict[str, dict[str, Any]] = {}
+    expanded_nodes: dict[str, list[str]] = {}
     current: str | None = None
     for line in out.splitlines():
         line = line.strip()
         m = re.match(r"PartitionName=(\S+)", line)
         if m:
             current = m.group(1)
-            partitions[current] = {"priority_tier": 1, "job_factor": 1}
-            continue
+            partitions[current] = {"priority_tier": 1, "job_factor": 1, "nodes": []}
         if not current:
             continue
+        m = re.search(r"\bNodes=(\S+)", line)
+        if m:
+            expression = m.group(1)
+            if expression not in expanded_nodes:
+                expanded_nodes[expression] = _expand_nodelist(expression)
+            partitions[current]["nodes"] = expanded_nodes[expression]
         m = re.search(r"PriorityTier=(\d+)", line)
         if m:
             partitions[current]["priority_tier"] = int(m.group(1))

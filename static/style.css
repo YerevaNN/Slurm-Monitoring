@@ -234,7 +234,7 @@ body {
 }
 
 .timeline-row .row-label {
-  flex: 0 0 52px;
+  flex: 0 0 96px;
   padding-right: 0.5rem;
   color: var(--text);
   font-size: 11px;
@@ -256,7 +256,7 @@ body {
 }
 
 .timeline-row.disk-row .row-label {
-  flex: 0 0 52px;
+  flex: 0 0 96px;
   display: flex;
   align-items: center;
   gap: 0.25rem;
@@ -640,4 +640,28 @@ body {
   background: var(--bg);
   color: var(--text);
   font: 0.75rem/1.25 monospace;
+}
+
+/* Partition membership below node names on both resource timelines. */
+.timeline-row .node-name { display: block; }
+.timeline-row .node-partitions {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 400;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+/* Stable pending reason colors, matching the legend; separators carry no state. */
+.timeline-row-pending rect.job-bar.wait {
+  opacity: 1;
+  stroke: var(--row-bg);
+  stroke-width: 0.75px;
+}
+.pending-legend-label {
+  color: var(--text-muted);
+  font-weight: 500;
+  margin-left: 6px;
 }

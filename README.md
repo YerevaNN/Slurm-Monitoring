@@ -10,6 +10,13 @@ unmeasured GPU jobs use distinct muted colors; pending jobs retain waiting-reaso
 colors and generated command controls. **The Usage page reports allocation-hours,
 not measured utilization.** Historical allocation cannot reconstruct past GPU activity.
 
+Node labels list configured partition membership in small muted text, refreshed
+from Slurm on the existing partition-cache interval. These names describe node
+membership, not per-user eligibility. Pending bars use one muted color per waiting
+reason: blue for general waiting, violet for dependencies, magenta for impossible
+dependencies, cyan for QOS/association limits and slate for holds. The legend lists
+each category; job IDs and row positions do not change these colors.
+
 ## Run the controller
 
 Requires Python 3.10+, Flask/Gunicorn and working `squeue`, `sinfo`, `scontrol`,

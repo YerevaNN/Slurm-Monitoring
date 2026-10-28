@@ -183,21 +183,22 @@
     return PALETTE[h % PALETTE.length];
   }
 
-  // Pending jobs use cool hues, separate from the red-to-green activity scale.
-  const PENDING_PALETTE = ["#2563eb", "#3b82f6", "#4f46e5", "#6366f1", "#0284c7", "#0ea5e9"];
+  // Pending colors encode waiting reasons only, never job IDs or row position.
   const PENDING_REASON_COLORS = {
-    "Dependency":                "#8b5cf6",  // violet
-    "DependencyNeverSatisfied":  "#c026d3",  // magenta
-    "QOSMaxGRESPerUser":         "#0891b2",  // cyan
-    "JobHeldUser":               "#475569",  // slate
-    "JobHeldAdmin":              "#475569",  // slate
+    waiting: "#3f5a80",
+    dependency: "#66547f",
+    blocked: "#80516f",
+    limits: "#3b6671",
+    held: "#4b5563",
   };
 
   function pendingColor(job) {
-    const r = (job.pending_reason || "").trim();
-    let hash = 0;
-    for (const c of String(job.job_id)) hash = (hash * 31 + c.charCodeAt(0)) >>> 0;
-    return PENDING_REASON_COLORS[r] || PENDING_PALETTE[hash % PENDING_PALETTE.length];
+    const reason = String(job.pending_reason || "").trim();
+    if (reason === "DependencyNeverSatisfied") return PENDING_REASON_COLORS.blocked;
+    if (reason === "Dependency") return PENDING_REASON_COLORS.dependency;
+    if (/^(QOS|Assoc)/i.test(reason)) return PENDING_REASON_COLORS.limits;
+    if (/^JobHeld/i.test(reason)) return PENDING_REASON_COLORS.held;
+    return PENDING_REASON_COLORS.waiting;
   }
 
   /**
@@ -741,7 +742,24 @@
       const rowHeight = heights[rowIndex] || BASE_ROW_HEIGHT;
       const rowEl = document.createElement("div");
       rowEl.className = "timeline-row" + (label === "Pending" ? " timeline-row-pending" : "");
-      rowEl.innerHTML = `<span class="row-label">${label}</span><div class="row-chart"></div>`;
+      rowEl.innerHTML = '<span class="row-label"></span><div class="row-chart"></div>';
+      const labelEl = rowEl.querySelector(".row-label");
+      const nameEl = document.createElement("span");
+      nameEl.className = "node-name";
+      nameEl.textContent = label;
+      labelEl.appendChild(nameEl);
+      if (label !== "Pending") {
+        const partitions = Object.entries(state.partitions)
+          .filter(([, partition]) => Array.isArray(partition.nodes) && partition.nodes.includes(label))
+          .map(([name]) => name).sort();
+        if (partitions.length) {
+          const partitionsEl = document.createElement("span");
+          partitionsEl.className = "node-partitions";
+          partitionsEl.textContent = partitions.join(", ");
+          partitionsEl.title = "Configured partitions: " + partitions.join(", ");
+          labelEl.appendChild(partitionsEl);
+        }
+      }
       const chartEl = rowEl.querySelector(".row-chart");
       rowEl.style.minHeight = rowHeight + "px";
       chartEl.style.height = rowHeight + "px";

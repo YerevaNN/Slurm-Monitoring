@@ -56,10 +56,15 @@
       <button id="job-command-copy" type="button" class="edit-save">Copy</button>
     </div>
   </div>
-  <div class="gpu-activity-legend" aria-label="Job color legend">Job color = average GPU activity:
+  <div class="gpu-activity-legend" aria-label="Job color legend">Running GPU activity (avg):
     <span style="background:#b91c1c">0–19%</span><span style="background:#c2410c">20–39%</span><span style="background:#a16207">40–59%</span><span style="background:#4d7c0f">60–79%</span><span style="background:#15803d">80–100%</span><span style="background:#64748b">No measurements</span>
-    <span style="background:#2563eb" title="Pending: blue; dependencies: violet; impossible dependencies: magenta; QOS: cyan; held: slate">Pending jobs</span>
     <span style="background:#566477">CPU only</span>
+    <strong class="pending-legend-label">Pending reason:</strong>
+    <span style="background:#3f5a80" title="Resources, priority, or another waiting reason; hover a job for the exact Slurm reason">Waiting</span>
+    <span style="background:#66547f" title="Waiting for another job to finish">Dependency</span>
+    <span style="background:#80516f" title="Dependency can never be satisfied">Blocked dependency</span>
+    <span style="background:#3b6671" title="QOS or association resource/account limits">QOS / limits</span>
+    <span style="background:#4b5563" title="Held by the user or administrator">Held</span>
     <small>Click a job for details</small>
   </div>
   <main class="dashboard">
